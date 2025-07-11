@@ -10,6 +10,7 @@ const {
 } = require('@whiskeysockets/baileys')
 const SessionModel = require('../models/sessionModel')
 const MessageStatusModel = require('../models/messageStatusModel')
+const ChatMessageModel = require('../models/chatModel')
 const logger = require('../utils/logger')
 const { getSocket } = require('./socket'); 
 
@@ -43,6 +44,50 @@ async function startWhatsApp(sessionId, userId = null) {
   sock.ev.on('connection.update', (update) =>
     handleConnectionUpdate(update, sessionId, sock, userId, io)
   );
+  sock.ev.on('messages.upsert', async (msgUpdate) => {
+    const messages = msgUpdate.messages;
+
+    for (const msg of messages) {
+      if (!msg.message) continue; // Skip if no message content
+
+      const from = msg.key.remoteJid;
+      const isFromMe = msg.key.fromMe;
+      const text =
+        msg.message?.conversation ||
+        msg.message?.extendedTextMessage?.text ||
+        msg.message?.imageMessage?.caption ||
+        msg.message?.videoMessage?.caption ||
+        '[Non-text message]';
+
+      logger.info(`📩 Chat from ${from}: ${text}`);
+
+      const remoteJid = msg.key.remoteJid;
+
+      // Filter hanya untuk kontak pribadi (bukan grup dan bukan newsletter)
+      const isPrivateChat = remoteJid.endsWith('@s.whatsapp.net');
+
+      if(isPrivateChat && text !== '[Non-text message]'){
+        // Simpan ke database jika perlu
+        await ChatMessageModel.create({
+          sessionId,
+          from,
+          text,
+          timestamp: new Date(Number(msg.messageTimestamp) * 1000),
+          fromMe: isFromMe,
+        });
+        // Kirim notifikasi ke frontend via Socket.io
+        const io = getSocket();
+        io.emit('new_message', {
+          sessionId,
+          from,
+          text,
+          timestamp: new Date(Number(msg.messageTimestamp) * 1000),
+          fromMe: isFromMe,
+        });
+      }
+
+    }
+  });
 }
 
 async function handleConnectionUpdate(update, sessionId, sock, userId, io) {

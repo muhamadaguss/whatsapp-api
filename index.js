@@ -11,6 +11,7 @@ const campaignRoutes = require('./routes/campaignRoutes')
 const userRoutes = require('./routes/userRoutes')
 const menuRoutes = require('./routes/menuRoutes')
 const templateRoutes = require('./routes/templateRoutes')
+const chatsRoutes = require('./routes/chatRoutes')
 const sequelize = require('./models/db')
 const { loadExistingSessions } = require('./auth/session')
 const logger = require('./utils/logger'); // Mengimpor logger
@@ -46,6 +47,7 @@ app.use('/campaign',campaignRoutes)
 app.use('/user',userRoutes)
 app.use('/menus',menuRoutes)
 app.use('/templates',templateRoutes)
+app.use('/chats',chatsRoutes)
 
 // Inisialisasi dan jalankan socket.io
 const server = http.createServer(app); // Gunakan app di sini
@@ -57,6 +59,15 @@ io.on('connection', (socket) => {
     logger.info(`❌ User disconnected: ${socket.id}`);
   });
 });
+
+sequelize.authenticate()
+  .then(() => {
+    logger.info('✅ Database connection established')
+  })
+  .catch((err) => {
+    logger.error('❌ Unable to connect to the database:', err)
+  })
+
 
 sequelize.sync({ alter: true }) // alter: true untuk menyesuaikan tabel dengan model jika diperlukan
   .then(() => {

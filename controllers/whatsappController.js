@@ -36,6 +36,7 @@ const getQRImage = async (req, res) => {
 
 const sendMessageWA = async (req, res) => {
   const { phone, message, sessionId } = req.body
+  console.log('📞 Mengirim pesan ke:', phone, 'dengan pesan:', message, 'pada session:', sessionId)
   if (!phone || !message || !sessionId) return res.status(400).send('Nomor, pesan, dan sessionId wajib.')
 
   try {
