@@ -41,6 +41,12 @@ const sendMessageWA = async (req, res) => {
 
   try {
     const sock = getSock(sessionId)
+    if (!sock) {
+      return res.status(404).json({
+        status: 'error',
+        message: `Session '${sessionId}' tidak ditemukan atau tidak aktif.`,
+      })
+    }
     const result = await sock.sendMessage(phone + '@s.whatsapp.net', { text: message })
     return res.status(200).json({ status: 'success', result })
   } catch (err) {
