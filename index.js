@@ -18,7 +18,7 @@ const logger = require('./utils/logger'); // Mengimpor logger
 const { initSocket } = require('./auth/socket');
 
 const app = express()
-const port = process.env.PORT || 3001
+const port = process.env.PORT || 3000
 
 const allowedOrigins = [
   'http://localhost:8080',
