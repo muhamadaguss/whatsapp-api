@@ -3,6 +3,7 @@ const cors = require('cors')
 const express = require('express')
 const http = require('http');
 const { Server } = require('socket.io');
+const bodyParser = require('body-parser')
 const whatsappRoutes = require('./routes/whatsappRoutes')
 const authRoutes = require('./routes/authRoutes')
 const downloadRoutes = require('./routes/downloadRoutes')
@@ -27,7 +28,7 @@ const allowedOrigins = [
   'http://127.0.0.1:8081'
 ];
 
-const corsOptions = {
+app.use(cors({
   origin: function (origin, callback) {
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
@@ -36,11 +37,21 @@ const corsOptions = {
     }
   },
   credentials: true,
-};
+}))
 
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+// Tambahan ini penting agar preflight request direspons dengan benar
+app.options('*', cors({
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+}));
 
+app.use(bodyParser.json())
 app.use('/whatsapp', whatsappRoutes)
 app.use('/auth',authRoutes)
 app.use('/download',downloadRoutes)
