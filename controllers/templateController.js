@@ -1,101 +1,83 @@
 const Template = require('../models/templateModel');
 const { Op } = require('sequelize');
+const logger = require('../utils/logger');
+const { asyncHandler, AppError } = require('../middleware/errorHandler');
 
-const getTemplates = async (req, res) => {
-    try {
-        const userId = req.user.id;
-        const templates = await Template.findAll({
-            where: { userId },
-            order: [['createdAt', 'DESC']],
-        });
-        res.status(200).json(templates);
-    } catch (error) {
-        console.error('Error getting templates:', error);
-        res.status(500).json({ message: 'Failed to get templates', error });
+const getTemplates = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const templates = await Template.findAll({
+        where: { userId },
+        order: [['createdAt', 'DESC']],
+    });
+    res.status(200).json(templates);
+});
+
+const createTemplate = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const { name, content, type } = req.body;
+
+    if (!name || !content) {
+        throw new AppError('Name and content are required', 400);
     }
-};
 
-const createTemplate = async (req, res) => {
-    try {
-        const userId = req.user.id;
-        const { name, content, type } = req.body;
+    const newTemplate = await Template.create({
+        userId,
+        name,
+        content,
+        type: type || 'text', // Default to 'text' if not provided
+    });
 
-        if (!name || !content) {
-            return res.status(400).json({ message: 'Name and content are required' });
-        }
+    res.status(201).json(newTemplate);
+})
 
-        const newTemplate = await Template.create({
-            userId,
-            name,
-            content,
-            type: type || 'text', // Default to 'text' if not provided
-        });
+const updateTemplate = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const { id, name, content, type } = req.body;
 
-        res.status(201).json(newTemplate);
-    } catch (error) {
-        console.error('Error creating template:', error);
-        res.status(500).json({ message: 'Failed to create template', error });
+    if (!id || !name || !content) {
+        throw new AppError('ID, name, and content are required', 400);
     }
-}
 
-const updateTemplate = async (req, res) => {
-    try {
-        const userId = req.user.id;
-        const { id, name, content, type } = req.body;
-
-        if (!id || !name || !content) {
-            return res.status(400).json({ message: 'ID, name, and content are required' });
+    const template = await Template.findOne({
+        where: {
+            id,
+            userId
         }
+    });
 
-        const template = await Template.findOne({
-            where: {
-                id,
-                userId
-            }
-        });
-
-        if (!template) {
-            return res.status(404).json({ message: 'Template not found' });
-        }
-
-        template.name = name;
-        template.content = content;
-        template.type = type || 'text'; // Default to 'text' if not provided
-        await template.save();
-
-        res.status(200).json(template);
-    } catch (error) {
-        console.error('Error updating template:', error);
-        res.status(500).json({ message: 'Failed to update template', error });
+    if (!template) {
+        throw new AppError('Template not found', 404);
     }
-}
-const deleteTemplate = async (req, res) => {
-    try {
-        const userId = req.user.id;
-        const { id } = req.body;
 
-        if (!id) {
-            return res.status(400).json({ message: 'ID is required' });
-        }
+    template.name = name;
+    template.content = content;
+    template.type = type || 'text'; // Default to 'text' if not provided
+    await template.save();
 
-        const template = await Template.findOne({
-            where: {
-                id,
-                userId
-            }
-        });
+    res.status(200).json(template);
+})
+const deleteTemplate = asyncHandler(async (req, res) => {
+    const userId = req.user.id;
+    const { id } = req.body;
 
-        if (!template) {
-            return res.status(404).json({ message: 'Template not found' });
-        }
-
-        await template.destroy();
-        res.status(200).json({ message: 'Template deleted successfully' });
-    } catch (error) {
-        console.error('Error deleting template:', error);
-        res.status(500).json({ message: 'Failed to delete template', error });
+    if (!id) {
+        throw new AppError('ID is required', 400);
     }
-}
+
+    const template = await Template.findOne({
+        where: {
+            id,
+            userId
+        }
+    });
+
+    if (!template) {
+        throw new AppError('Template not found', 404);
+    }
+
+    await template.destroy();
+    res.status(200).json({ message: 'Template deleted successfully' });
+})
 
 module.exports = {
     getTemplates,

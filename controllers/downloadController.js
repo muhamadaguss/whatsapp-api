@@ -1,6 +1,7 @@
 const XLSX = require('xlsx');
+const { asyncHandler, AppError } = require('../middleware/errorHandler');
 
-const downloadTemplate = (req, res) => {
+const downloadTemplate = asyncHandler((req, res) => {
     // 1. Buat workbook baru
     const workbook = XLSX.utils.book_new();
     
@@ -22,6 +23,6 @@ const downloadTemplate = (req, res) => {
     res.setHeader('Content-Disposition', 'attachment; filename="template.xlsx"');
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.send(buffer);
-}
+})
 
 module.exports = { downloadTemplate }

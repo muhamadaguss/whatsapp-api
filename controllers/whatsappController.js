@@ -11,8 +11,9 @@ const fs = require('fs')
 const logger = require('../utils/logger')
 const SessionModel = require('../models/sessionModel')
 const UserModel = require('../models/userModel')
+const { asyncHandler, AppError } = require('../middleware/errorHandler')
 
-const getQRImage = async (req, res) => {
+const getQRImage = asyncHandler(async (req, res) => {
   const { sessionId } = req.params
 
   if (!getSock(sessionId)) {
@@ -22,41 +23,35 @@ const getQRImage = async (req, res) => {
   const qrData = await waitForQRCode(sessionId)
   if (qrData) {
     const base64 = qrData.replace(/^data:image\/png;base64,/, '')
-    // res.setHeader('Content-Type', 'image/png')
-    // res.end(Buffer.from(base64, 'base64'))
     return res.status(200).json({
       status: 'success',
       qrCode: base64, // Mengembalikan QR code dalam bentuk base64
     });
   } else {
-    res.status(404).json({ status: 'error', message: 'QR belum tersedia' })
+    throw new AppError('QR belum tersedia', 404)
   }
-}
+})
 
 
-const sendMessageWA = async (req, res) => {
+const sendMessageWA = asyncHandler(async (req, res) => {
   const { phone, message, sessionId } = req.body
-  console.log('📞 Mengirim pesan ke:', phone, 'dengan pesan:', message, 'pada session:', sessionId)
-  if (!phone || !message || !sessionId) return res.status(400).send('Nomor, pesan, dan sessionId wajib.')
-
-  try {
-    const sock = getSock(sessionId)
-    if (!sock) {
-      return res.status(404).json({
-        status: 'error',
-        message: `Session '${sessionId}' tidak ditemukan atau tidak aktif.`,
-      })
-    }
-    const result = await sock.sendMessage(phone + '@s.whatsapp.net', { text: message })
-    return res.status(200).json({ status: 'success', result })
-  } catch (err) {
-    console.error('❌ Gagal kirim pesan:', err)
-    return res.status(500).json({ status: 'error', message: err.message })
+  logger.info(`📞 Mengirim pesan ke: ${phone}, dengan pesan: ${message}, pada session: ${sessionId}`)
+  
+  if (!phone || !message || !sessionId) {
+    throw new AppError('Nomor, pesan, dan sessionId wajib.', 400)
   }
-}
+
+  const sock = getSock(sessionId)
+  if (!sock) {
+    throw new AppError(`Session '${sessionId}' tidak ditemukan atau tidak aktif.`, 404)
+  }
+  
+  const result = await sock.sendMessage(phone + '@s.whatsapp.net', { text: message })
+  return res.status(200).json({ status: 'success', result })
+})
 
 
-const uploadExcel = async (req, res) => {
+const uploadExcel = asyncHandler(async (req, res) => {
   const { sessionId } = req.params
   const messageTemplate = req.body.messageTemplate || ''
   const notifyNumber = req.body.notifyNumber?.replace(/\D/g, '')
@@ -66,7 +61,7 @@ const uploadExcel = async (req, res) => {
 
   // Validasi awal
   if (selectTarget !== 'input' && !filePath) {
-    return res.status(400).json({ error: 'File tidak ditemukan. Silakan upload file Excel atau gunakan input manual.' })
+    throw new AppError('File tidak ditemukan. Silakan upload file Excel atau gunakan input manual.', 400)
   }
 
   // Langsung balas ke client
@@ -85,63 +80,47 @@ const uploadExcel = async (req, res) => {
       logger.error('❌ Gagal saat blast:', err)
       logger.error('❌ Error stack:', err?.stack)
     })
-}
+})
 
 
-const logoutSession = async (req, res) => {
+const logoutSession = asyncHandler(async (req, res) => {
     const { sessionId } = req.params
   
-    try {
-      const sock = getSock(sessionId)
-  
-      if (sock) {
-        await sock.logout() // Jika masih aktif
-        logger.info(`🔌 Logout session ${sessionId} berhasil.`)
-      } else {
-        logger.warn(`⚠️ Session ${sessionId} sudah tidak aktif atau undefined.`)
-      }
+    const sock = getSock(sessionId)
 
-      cleanupSession(sessionId,req.user?.id) // Hapus session dari memori
-  
-      return res.status(200).json({
-        status: 'success',
-        message: `Logout session ${sessionId} berhasil.`,
-      })
-    } catch (err) {
-      console.error(`❌ Gagal logout session ${sessionId}:`, err.message)
-      return res.status(500).json({
-        status: 'error',
-        message: err.message || 'Gagal logout session',
-      })
+    if (sock) {
+      await sock.logout() // Jika masih aktif
+      logger.info(`🔌 Logout session ${sessionId} berhasil.`)
+    } else {
+      logger.warn(`⚠️ Session ${sessionId} sudah tidak aktif atau undefined.`)
     }
-  }
+
+    cleanupSession(sessionId,req.user?.id) // Hapus session dari memori
+
+    return res.status(200).json({
+      status: 'success',
+      message: `Logout session ${sessionId} berhasil.`,
+    })
+})
   
 
-  const getActiveSessions = async (req, res) => {
-    try {
-      const userId = req.user.id // pastikan middleware auth sudah pasang req.user
-  
-      const activeSessions = await SessionModel.findAll({
-        where: { userId }, // filter hanya session milik user login
-        include: [{
-          model: UserModel,
-          as: 'user',
-          attributes: ['id', 'username', 'role'], // ambil kolom yang diperlukan dari User
-        }],
-      })
-  
-      return res.status(200).json({
-        status: 'success',
-        activeSessions,
-      })
-    } catch (error) {
-      console.error('Error fetching sessions:', error)
-      return res.status(500).json({
-        status: 'error',
-        message: 'Failed to get active sessions',
-      })
-    }
-  }
+const getActiveSessions = asyncHandler(async (req, res) => {
+    const userId = req.user.id // pastikan middleware auth sudah pasang req.user
+
+    const activeSessions = await SessionModel.findAll({
+      where: { userId }, // filter hanya session milik user login
+      include: [{
+        model: UserModel,
+        as: 'user',
+        attributes: ['id', 'username', 'role'], // ambil kolom yang diperlukan dari User
+      }],
+    })
+
+    return res.status(200).json({
+      status: 'success',
+      activeSessions,
+    })
+})
 
 
 module.exports = { 

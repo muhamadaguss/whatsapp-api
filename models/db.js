@@ -5,7 +5,7 @@ const sequelize = new Sequelize(process.env.DB_NAME, process.env.DB_USER, proces
   host: process.env.DB_HOST || 'localhost',
   port: process.env.DB_PORT || 5432,
   dialect: 'postgres',
-  logging: console.log, // Aktifkan logging untuk debugging
+  logging: false, // Disable SQL logging for cleaner output
 })
 
 module.exports = sequelize

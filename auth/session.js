@@ -1,7 +1,6 @@
 const fs = require('fs')
 const path = require('path')
 const QRCode = require('qrcode')
-const axios = require('axios')
 const {
   default: makeWASocket,
   useMultiFileAuthState,
