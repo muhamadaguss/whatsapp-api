@@ -54,7 +54,7 @@ const sequelize = new Sequelize(
     define: {
       timestamps: true,
       underscored: false,
-      freezeTableName: true,
+      freezeTableName: false, // Allow pluralization: User -> users
     },
   }
 );

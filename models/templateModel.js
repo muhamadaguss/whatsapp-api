@@ -1,30 +1,37 @@
-const { DataTypes } = require('sequelize');
-const sequelize = require('./db');
-const User = require('./userModel');
+const { DataTypes } = require("sequelize");
+const sequelize = require("./db");
+const User = require("./userModel");
 
-const Template = sequelize.define('Template', {
+const Template = sequelize.define(
+  "Template",
+  {
     userId: {
-    type: DataTypes.INTEGER,
-    references: {
+      type: DataTypes.INTEGER,
+      references: {
         model: User,
-        key: 'id',
+        key: "id",
+      },
     },
-    },
-    name: { 
-        type: DataTypes.STRING,
-        allowNull: false
+    name: {
+      type: DataTypes.STRING,
+      allowNull: false,
     },
     content: {
-        type: DataTypes.TEXT,
-        allowNull: false
+      type: DataTypes.TEXT,
+      allowNull: false,
     },
     type: {
-        type: DataTypes.STRING,
-        allowNull: false,
-        defaultValue: 'text',
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "text",
     }, // e.g., 'text', 'image', 'video'
-}, { timestamps: true });
+  },
+  {
+    timestamps: true,
+    tableName: "templates",
+  }
+);
 
-Template.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+Template.belongsTo(User, { foreignKey: "userId", as: "user" });
 
 module.exports = Template;

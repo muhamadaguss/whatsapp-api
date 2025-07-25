@@ -1,5 +1,5 @@
-const crypto = require('crypto');
-const logger = require('./logger');
+const crypto = require("crypto");
+const logger = require("./logger");
 
 /**
  * Security utility functions
@@ -11,7 +11,7 @@ class SecurityUtils {
    * @returns {string} - Hex encoded secret
    */
   static generateJWTSecret(length = 64) {
-    return crypto.randomBytes(length).toString('hex');
+    return crypto.randomBytes(length).toString("hex");
   }
 
   /**
@@ -24,17 +24,21 @@ class SecurityUtils {
       valid: true,
       score: 0,
       issues: [],
-      recommendations: []
+      recommendations: [],
     };
 
     // Check minimum length
     if (secret.length < 32) {
       result.valid = false;
-      result.issues.push('JWT secret is too short (minimum 32 characters)');
-      result.recommendations.push('Use at least 32 characters for development, 64+ for production');
+      result.issues.push("JWT secret is too short (minimum 32 characters)");
+      result.recommendations.push(
+        "Use at least 32 characters for development, 64+ for production"
+      );
     } else if (secret.length < 64) {
       result.score += 1;
-      result.recommendations.push('Consider using 64+ characters for better security');
+      result.recommendations.push(
+        "Consider using 64+ characters for better security"
+      );
     } else {
       result.score += 2;
     }
@@ -43,23 +47,25 @@ class SecurityUtils {
     const weakPatterns = [
       /^(password|secret|key|token)/i,
       /^(123|abc|test|demo)/i,
-      /^(.)\1{10,}/,  // Repeated characters
-      /^(qwerty|asdf|zxcv)/i
+      /^(.)\1{10,}/, // Repeated characters
+      /^(qwerty|asdf|zxcv)/i,
     ];
 
-    weakPatterns.forEach(pattern => {
+    weakPatterns.forEach((pattern) => {
       if (pattern.test(secret)) {
         result.valid = false;
-        result.issues.push('JWT secret contains weak patterns');
-        result.recommendations.push('Use a cryptographically secure random string');
+        result.issues.push("JWT secret contains weak patterns");
+        result.recommendations.push(
+          "Use a cryptographically secure random string"
+        );
       }
     });
 
     // Check entropy (simplified)
     const uniqueChars = new Set(secret.toLowerCase()).size;
     if (uniqueChars < 10) {
-      result.issues.push('JWT secret has low character diversity');
-      result.recommendations.push('Use a mix of letters, numbers, and symbols');
+      result.issues.push("JWT secret has low character diversity");
+      result.recommendations.push("Use a mix of letters, numbers, and symbols");
     } else {
       result.score += 1;
     }
@@ -81,26 +87,37 @@ class SecurityUtils {
     const result = {
       valid: true,
       issues: [],
-      recommendations: []
+      recommendations: [],
     };
 
     origins.forEach((origin, index) => {
       // Check for wildcard in production
-      if (origin === '*') {
-        result.issues.push('Wildcard CORS origin (*) is not secure for production');
-        result.recommendations.push('Specify exact origins instead of using wildcard');
+      if (origin === "*") {
+        result.issues.push(
+          "Wildcard CORS origin (*) is not secure for production"
+        );
+        result.recommendations.push(
+          "Specify exact origins instead of using wildcard"
+        );
       }
 
       // Check for localhost in production
-      if (process.env.NODE_ENV === 'production' && origin.includes('localhost')) {
+      if (
+        process.env.NODE_ENV === "production" &&
+        origin.includes("localhost")
+      ) {
         result.issues.push(`Localhost origin found in production: ${origin}`);
-        result.recommendations.push('Remove localhost origins in production');
+        result.recommendations.push("Remove localhost origins in production");
       }
 
       // Check for HTTP in production
-      if (process.env.NODE_ENV === 'production' && origin.startsWith('http://') && !origin.includes('localhost')) {
+      if (
+        process.env.NODE_ENV === "production" &&
+        origin.startsWith("http://") &&
+        !origin.includes("localhost")
+      ) {
         result.issues.push(`Insecure HTTP origin in production: ${origin}`);
-        result.recommendations.push('Use HTTPS origins in production');
+        result.recommendations.push("Use HTTPS origins in production");
       }
 
       // Validate URL format
@@ -122,18 +139,20 @@ class SecurityUtils {
    * @returns {Object} - CORS configuration
    */
   static generateCORSConfig(allowedOrigins = [], options = {}) {
-    const isProduction = process.env.NODE_ENV === 'production';
-    
+    const isProduction = process.env.NODE_ENV === "production";
+
     // Validate origins
     const validation = this.validateCORSOrigins(allowedOrigins);
     if (!validation.valid) {
-      logger.error('CORS configuration validation failed:', validation.issues);
-      throw new Error('Invalid CORS origins configuration');
+      logger.error("CORS configuration validation failed:", validation.issues);
+      throw new Error("Invalid CORS origins configuration");
     }
 
     // Log warnings
-    validation.issues.forEach(issue => logger.warn(`CORS Warning: ${issue}`));
-    validation.recommendations.forEach(rec => logger.info(`CORS Recommendation: ${rec}`));
+    validation.issues.forEach((issue) => logger.warn(`CORS Warning: ${issue}`));
+    validation.recommendations.forEach((rec) =>
+      logger.info(`CORS Recommendation: ${rec}`)
+    );
 
     const corsConfig = {
       origin: function (origin, callback) {
@@ -150,18 +169,25 @@ class SecurityUtils {
         }
       },
       credentials: true,
-      methods: options.methods || ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: options.allowedHeaders || [
-        'Origin',
-        'X-Requested-With',
-        'Content-Type',
-        'Accept',
-        'Authorization'
+      methods: options.methods || [
+        "GET",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "OPTIONS",
       ],
-      exposedHeaders: options.exposedHeaders || ['X-Total-Count'],
+      allowedHeaders: options.allowedHeaders || [
+        "Origin",
+        "X-Requested-With",
+        "Content-Type",
+        "Accept",
+        "Authorization",
+      ],
+      exposedHeaders: options.exposedHeaders || ["X-Total-Count"],
       maxAge: isProduction ? 86400 : 300, // 24 hours in production, 5 minutes in dev
       preflightContinue: false,
-      optionsSuccessStatus: 204
+      optionsSuccessStatus: 204,
     };
 
     return corsConfig;
@@ -172,8 +198,8 @@ class SecurityUtils {
    * @returns {Object} - Security headers
    */
   static generateSecurityHeaders() {
-    const isProduction = process.env.NODE_ENV === 'production';
-    
+    const isProduction = process.env.NODE_ENV === "production";
+
     return {
       // Content Security Policy
       contentSecurityPolicy: {
@@ -186,28 +212,30 @@ class SecurityUtils {
           fontSrc: ["'self'"],
           objectSrc: ["'none'"],
           mediaSrc: ["'self'"],
-          frameSrc: ["'none'"]
-        }
+          frameSrc: ["'none'"],
+        },
       },
-      
+
       // Other security headers
       crossOriginEmbedderPolicy: false, // Disable if causing issues
       crossOriginOpenerPolicy: { policy: "same-origin" },
       crossOriginResourcePolicy: { policy: "cross-origin" },
       dnsPrefetchControl: { allow: false },
-      frameguard: { action: 'deny' },
+      frameguard: { action: "deny" },
       hidePoweredBy: true,
-      hsts: isProduction ? {
-        maxAge: 31536000,
-        includeSubDomains: true,
-        preload: true
-      } : false,
+      hsts: isProduction
+        ? {
+            maxAge: 31536000,
+            includeSubDomains: true,
+            preload: true,
+          }
+        : false,
       ieNoOpen: true,
       noSniff: true,
       originAgentCluster: true,
       permittedCrossDomainPolicies: false,
       referrerPolicy: { policy: "no-referrer" },
-      xssFilter: true
+      xssFilter: true,
     };
   }
 
@@ -216,21 +244,21 @@ class SecurityUtils {
    * @returns {Object} - Rate limit config
    */
   static generateRateLimitConfig() {
-    const isProduction = process.env.NODE_ENV === 'production';
-    
+    const isProduction = process.env.NODE_ENV === "production";
+
     return {
       windowMs: 15 * 60 * 1000, // 15 minutes
       max: isProduction ? 100 : 1000, // Stricter in production
       message: {
-        error: 'Too many requests from this IP, please try again later.',
-        retryAfter: '15 minutes'
+        error: "Too many requests from this IP, please try again later.",
+        retryAfter: "15 minutes",
       },
       standardHeaders: true,
       legacyHeaders: false,
       skip: (req) => {
         // Skip rate limiting for health checks
-        return req.path === '/health' || req.path === '/ready';
-      }
+        return req.path === "/health" || req.path === "/ready";
+      },
     };
   }
 
@@ -239,8 +267,8 @@ class SecurityUtils {
    * @returns {Object} - Speed limit config
    */
   static generateSpeedLimitConfig() {
-    const isProduction = process.env.NODE_ENV === 'production';
-    
+    const isProduction = process.env.NODE_ENV === "production";
+
     return {
       windowMs: 15 * 60 * 1000, // 15 minutes
       delayAfter: isProduction ? 30 : 50, // Start delaying after N requests
@@ -248,10 +276,10 @@ class SecurityUtils {
       maxDelayMs: isProduction ? 30000 : 20000, // Maximum delay
       skip: (req) => {
         // Skip speed limiting for health checks
-        return req.path === '/health' || req.path === '/ready';
+        return req.path === "/health" || req.path === "/ready";
       },
       validate: {
-        delayMs: false // Disable the v2 migration warning
+        delayMs: false, // Disable the v2 migration warning
       },
       // Optional: Custom delay function for progressive delays
       // delayMs: (used, req) => {
@@ -277,8 +305,8 @@ class SecurityUtils {
    * @returns {Object} - Session configuration
    */
   static generateSessionConfig() {
-    const isProduction = process.env.NODE_ENV === 'production';
-    
+    const isProduction = process.env.NODE_ENV === "production";
+
     return {
       secret: process.env.SESSION_SECRET || this.generateJWTSecret(32),
       resave: false,
@@ -287,8 +315,8 @@ class SecurityUtils {
         secure: isProduction, // HTTPS only in production
         httpOnly: true,
         maxAge: 24 * 60 * 60 * 1000, // 24 hours
-        sameSite: isProduction ? 'strict' : 'lax'
-      }
+        sameSite: isProduction ? "strict" : "lax",
+      },
     };
   }
 }
