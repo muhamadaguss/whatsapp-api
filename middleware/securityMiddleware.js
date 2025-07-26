@@ -1,5 +1,5 @@
-const logger = require('../utils/logger');
-const SecurityUtils = require('../utils/security');
+const logger = require("../utils/logger");
+const SecurityUtils = require("../utils/security");
 
 /**
  * Security middleware for additional protection
@@ -10,27 +10,33 @@ const SecurityUtils = require('../utils/security');
  */
 const requestLogger = (req, res, next) => {
   const start = Date.now();
-  
-  // Log request
-  logger.info({
-    method: req.method,
-    url: req.url,
-    ip: req.ip,
-    userAgent: req.get('User-Agent'),
-    origin: req.get('Origin'),
-    referer: req.get('Referer')
-  }, 'Incoming request');
 
-  // Log response
-  res.on('finish', () => {
-    const duration = Date.now() - start;
-    logger.info({
+  // Log request
+  logger.info(
+    {
       method: req.method,
       url: req.url,
-      statusCode: res.statusCode,
-      duration: `${duration}ms`,
-      ip: req.ip
-    }, 'Request completed');
+      ip: req.ip,
+      userAgent: req.get("User-Agent"),
+      origin: req.get("Origin"),
+      referer: req.get("Referer"),
+    },
+    "Incoming request"
+  );
+
+  // Log response
+  res.on("finish", () => {
+    const duration = Date.now() - start;
+    logger.info(
+      {
+        method: req.method,
+        url: req.url,
+        statusCode: res.statusCode,
+        duration: `${duration}ms`,
+        ip: req.ip,
+      },
+      "Request completed"
+    );
   });
 
   next();
@@ -41,12 +47,12 @@ const requestLogger = (req, res, next) => {
  */
 const securityHeaders = (req, res, next) => {
   // Remove sensitive headers
-  res.removeHeader('X-Powered-By');
-  
+  res.removeHeader("X-Powered-By");
+
   // Add custom security headers
-  res.setHeader('X-Request-ID', req.id || 'unknown');
-  res.setHeader('X-Response-Time', Date.now());
-  
+  res.setHeader("X-Request-ID", req.id || "unknown");
+  res.setHeader("X-Response-Time", Date.now());
+
   next();
 };
 
@@ -56,18 +62,18 @@ const securityHeaders = (req, res, next) => {
 const sanitizeInput = (req, res, next) => {
   // Sanitize common XSS patterns
   const sanitizeString = (str) => {
-    if (typeof str !== 'string') return str;
-    
+    if (typeof str !== "string") return str;
+
     return str
-      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-      .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, '')
-      .replace(/javascript:/gi, '')
-      .replace(/on\w+\s*=/gi, '');
+      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
+      .replace(/<iframe\b[^<]*(?:(?!<\/iframe>)<[^<]*)*<\/iframe>/gi, "")
+      .replace(/javascript:/gi, "")
+      .replace(/on\w+\s*=/gi, "");
   };
 
   // Recursively sanitize object
   const sanitizeObject = (obj) => {
-    if (obj === null || typeof obj !== 'object') {
+    if (obj === null || typeof obj !== "object") {
       return sanitizeString(obj);
     }
 
@@ -99,8 +105,10 @@ const sanitizeInput = (req, res, next) => {
  * API key validation middleware (if using API keys)
  */
 const validateApiKey = (req, res, next) => {
-  const apiKey = req.headers['x-api-key'];
-  const validApiKeys = process.env.API_KEYS ? process.env.API_KEYS.split(',') : [];
+  const apiKey = req.headers["x-api-key"];
+  const validApiKeys = process.env.API_KEYS
+    ? process.env.API_KEYS.split(",")
+    : [];
 
   // Skip if no API keys configured
   if (validApiKeys.length === 0) {
@@ -108,15 +116,18 @@ const validateApiKey = (req, res, next) => {
   }
 
   if (!apiKey || !validApiKeys.includes(apiKey)) {
-    logger.warn({
-      ip: req.ip,
-      userAgent: req.get('User-Agent'),
-      apiKey: apiKey ? 'provided' : 'missing'
-    }, 'Invalid API key attempt');
-    
+    logger.warn(
+      {
+        ip: req.ip,
+        userAgent: req.get("User-Agent"),
+        apiKey: apiKey ? "provided" : "missing",
+      },
+      "Invalid API key attempt"
+    );
+
     return res.status(401).json({
-      status: 'error',
-      message: 'Invalid or missing API key'
+      status: "error",
+      message: "Invalid or missing API key",
     });
   }
 
@@ -128,23 +139,26 @@ const validateApiKey = (req, res, next) => {
  */
 const validateOrigin = (allowedOrigins) => {
   return (req, res, next) => {
-    const origin = req.get('Origin');
-    
+    const origin = req.get("Origin");
+
     // Skip for same-origin requests
     if (!origin) {
       return next();
     }
 
     if (!SecurityUtils.isOriginAllowed(origin, allowedOrigins)) {
-      logger.warn({
-        origin,
-        ip: req.ip,
-        userAgent: req.get('User-Agent')
-      }, 'Blocked request from unauthorized origin');
-      
+      logger.warn(
+        {
+          origin,
+          ip: req.ip,
+          userAgent: req.get("User-Agent"),
+        },
+        "Blocked request from unauthorized origin"
+      );
+
       return res.status(403).json({
-        status: 'error',
-        message: 'Origin not allowed'
+        status: "error",
+        message: "Origin not allowed",
       });
     }
 
@@ -157,28 +171,42 @@ const validateOrigin = (allowedOrigins) => {
  */
 const validateContentType = (req, res, next) => {
   // Only validate for POST, PUT, PATCH requests
-  if (!['POST', 'PUT', 'PATCH'].includes(req.method)) {
+  if (!["POST", "PUT", "PATCH"].includes(req.method)) {
     return next();
   }
 
-  const contentType = req.get('Content-Type');
+  const contentType = req.get("Content-Type");
+  const contentLength = req.get("Content-Length");
+
+  // Skip validation for PATCH requests with no body (Content-Length: 0 or undefined)
+  if (req.method === "PATCH" && (!contentLength || contentLength === "0")) {
+    return next();
+  }
+
   const allowedTypes = [
-    'application/json',
-    'application/x-www-form-urlencoded',
-    'multipart/form-data'
+    "application/json",
+    "application/x-www-form-urlencoded",
+    "multipart/form-data",
   ];
 
-  if (!contentType || !allowedTypes.some(type => contentType.includes(type))) {
-    logger.warn({
-      contentType,
-      method: req.method,
-      url: req.url,
-      ip: req.ip
-    }, 'Invalid content type');
-    
+  if (
+    !contentType ||
+    !allowedTypes.some((type) => contentType.includes(type))
+  ) {
+    logger.warn(
+      {
+        contentType,
+        contentLength,
+        method: req.method,
+        url: req.url,
+        ip: req.ip,
+      },
+      "Invalid content type"
+    );
+
     return res.status(400).json({
-      status: 'error',
-      message: 'Invalid content type'
+      status: "error",
+      message: "Invalid content type",
     });
   }
 
@@ -188,25 +216,28 @@ const validateContentType = (req, res, next) => {
 /**
  * Request size validation middleware
  */
-const validateRequestSize = (maxSize = '10mb') => {
+const validateRequestSize = (maxSize = "10mb") => {
   return (req, res, next) => {
-    const contentLength = req.get('Content-Length');
-    
+    const contentLength = req.get("Content-Length");
+
     if (contentLength) {
       const sizeInBytes = parseInt(contentLength);
       const maxSizeInBytes = parseSize(maxSize);
-      
+
       if (sizeInBytes > maxSizeInBytes) {
-        logger.warn({
-          contentLength: sizeInBytes,
-          maxSize: maxSizeInBytes,
-          ip: req.ip,
-          url: req.url
-        }, 'Request size exceeded');
-        
+        logger.warn(
+          {
+            contentLength: sizeInBytes,
+            maxSize: maxSizeInBytes,
+            ip: req.ip,
+            url: req.url,
+          },
+          "Request size exceeded"
+        );
+
         return res.status(413).json({
-          status: 'error',
-          message: 'Request entity too large'
+          status: "error",
+          message: "Request entity too large",
         });
       }
     }
@@ -223,15 +254,18 @@ function parseSize(size) {
     b: 1,
     kb: 1024,
     mb: 1024 * 1024,
-    gb: 1024 * 1024 * 1024
+    gb: 1024 * 1024 * 1024,
   };
 
-  const match = size.toString().toLowerCase().match(/^(\d+(?:\.\d+)?)\s*([kmg]?b)$/);
+  const match = size
+    .toString()
+    .toLowerCase()
+    .match(/^(\d+(?:\.\d+)?)\s*([kmg]?b)$/);
   if (!match) return 0;
 
   const value = parseFloat(match[1]);
   const unit = match[2];
-  
+
   return Math.floor(value * (units[unit] || 1));
 }
 
@@ -242,5 +276,5 @@ module.exports = {
   validateApiKey,
   validateOrigin,
   validateContentType,
-  validateRequestSize
+  validateRequestSize,
 };
