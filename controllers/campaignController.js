@@ -109,14 +109,22 @@ const getMessageTrends = asyncHandler(async (req, res) => {
   const { period } = req.body;
 
   const now = new Date();
-  let startDate, endDate, groupBy, dateFormat;
+  let startDate, endDate, groupByExpression, orderByExpression;
 
   switch (period) {
     case "today":
       startDate = new Date(now.setHours(0, 0, 0, 0));
       endDate = new Date(now.setHours(23, 59, 59, 999));
-      groupBy = "HOUR";
-      dateFormat = "%H:00";
+      // PostgreSQL: Extract hour and format as "HH:00"
+      groupByExpression = sequelize.fn(
+        "TO_CHAR",
+        sequelize.col("createdAt"),
+        'HH24":00"'
+      );
+      orderByExpression = sequelize.fn(
+        "EXTRACT",
+        sequelize.literal('HOUR FROM "createdAt"')
+      );
       break;
     case "weekly": {
       const day = now.getDay();
@@ -127,8 +135,16 @@ const getMessageTrends = asyncHandler(async (req, res) => {
       endDate = new Date(startDate);
       endDate.setDate(startDate.getDate() + 6);
       endDate.setHours(23, 59, 59, 999);
-      groupBy = "DAY";
-      dateFormat = "%a";
+      // PostgreSQL: Get day name (Mon, Tue, etc.)
+      groupByExpression = sequelize.fn(
+        "TO_CHAR",
+        sequelize.col("createdAt"),
+        "Dy"
+      );
+      orderByExpression = sequelize.fn(
+        "EXTRACT",
+        sequelize.literal('DOW FROM "createdAt"')
+      );
       break;
     }
     case "monthly":
@@ -143,18 +159,23 @@ const getMessageTrends = asyncHandler(async (req, res) => {
         59,
         999
       );
-      groupBy = "DAY";
-      dateFormat = "Day %d";
+      // PostgreSQL: Format as "Day DD"
+      groupByExpression = sequelize.fn(
+        "TO_CHAR",
+        sequelize.col("createdAt"),
+        '"Day "DD'
+      );
+      orderByExpression = sequelize.fn(
+        "EXTRACT",
+        sequelize.literal('DAY FROM "createdAt"')
+      );
       break;
   }
 
   // Get aggregated data by time period
   const trends = await Blast.findAll({
     attributes: [
-      [
-        sequelize.fn("DATE_FORMAT", sequelize.col("createdAt"), dateFormat),
-        "name",
-      ],
+      [groupByExpression, "name"],
       [sequelize.fn("SUM", sequelize.col("sentCount")), "success"],
       [sequelize.fn("SUM", sequelize.col("failedCount")), "failed"],
       [sequelize.fn("SUM", sequelize.col("totalRecipients")), "total"],
@@ -165,15 +186,8 @@ const getMessageTrends = asyncHandler(async (req, res) => {
         [Op.between]: [startDate, endDate],
       },
     },
-    group: [
-      sequelize.fn("DATE_FORMAT", sequelize.col("createdAt"), dateFormat),
-    ],
-    order: [
-      [
-        sequelize.fn("DATE_FORMAT", sequelize.col("createdAt"), dateFormat),
-        "ASC",
-      ],
-    ],
+    group: [groupByExpression],
+    order: [[orderByExpression, "ASC"]],
     raw: true,
   });
 
@@ -181,7 +195,7 @@ const getMessageTrends = asyncHandler(async (req, res) => {
   const filledTrends = [];
   if (period === "today") {
     for (let i = 0; i < 24; i++) {
-      const hourLabel = `${i}:00`;
+      const hourLabel = `${i.toString().padStart(2, "0")}:00`;
       const existing = trends.find((t) => t.name === hourLabel);
       filledTrends.push({
         name: hourLabel,
@@ -208,7 +222,7 @@ const getMessageTrends = asyncHandler(async (req, res) => {
       0
     ).getDate();
     for (let i = 1; i <= daysInMonth; i++) {
-      const dayLabel = `Day ${i}`;
+      const dayLabel = `Day ${i.toString().padStart(2, "0")}`;
       const existing = trends.find((t) => t.name === dayLabel);
       filledTrends.push({
         name: dayLabel,

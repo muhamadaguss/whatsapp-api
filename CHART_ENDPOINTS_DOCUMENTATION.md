@@ -111,14 +111,25 @@ Kedua endpoint memerlukan JWT token yang valid melalui middleware `verifyToken`.
 ## Database Queries
 
 ### Message Trends
-- Menggunakan `DATE_FORMAT` untuk grouping berdasarkan periode
+- Menggunakan PostgreSQL `TO_CHAR` untuk formatting tanggal berdasarkan periode
+- Menggunakan `EXTRACT` untuk ordering yang tepat
 - Menggunakan `SUM` untuk agregasi data
 - Data yang kosong akan diisi dengan nilai 0
+- Format output:
+  - Today: "00:00", "01:00", ..., "23:00"
+  - Weekly: "Mon", "Tue", ..., "Sun"
+  - Monthly: "Day 01", "Day 02", ..., "Day 31"
 
 ### Message Type Performance
 - Menganalisis `messageTemplate` untuk kategorisasi
 - Menghitung persentase success/failed rate
 - Mengembalikan data dalam format yang siap untuk chart
+
+## PostgreSQL Compatibility
+Endpoint ini telah dioptimasi untuk PostgreSQL dengan menggunakan:
+- `TO_CHAR()` untuk formatting tanggal
+- `EXTRACT()` untuk ekstraksi komponen tanggal
+- Proper escaping untuk literal strings dalam format
 
 ## Frontend Integration
 
