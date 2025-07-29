@@ -297,7 +297,15 @@ class GracefulShutdownManager {
       // Handle unhandled promise rejections
       process.removeAllListeners("unhandledRejection");
       process.on("unhandledRejection", (reason, promise) => {
-        logger.error("💥 Unhandled Rejection at:", promise, "reason:", reason);
+        logger.error("💥 Unhandled Rejection Details:");
+        logger.error("Promise:", promise);
+        logger.error("Reason:", reason);
+        logger.error("Stack:", reason?.stack || "No stack trace available");
+        logger.error("Type:", typeof reason);
+        logger.error(
+          "Full error object:",
+          JSON.stringify(reason, Object.getOwnPropertyNames(reason), 2)
+        );
         this.executeShutdown("unhandledRejection");
       });
 
