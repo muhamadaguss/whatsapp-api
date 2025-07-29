@@ -108,6 +108,7 @@ app.use(requestTrackingMiddleware(shutdownManager));
 app.use(shutdownMiddleware(shutdownManager));
 
 // Rate limiting
+app.set("trust proxy", 1);
 const rateLimitConfig = SecurityUtils.generateRateLimitConfig();
 const limiter = rateLimit(rateLimitConfig);
 app.use("/api/", limiter); // Apply to API routes only
