@@ -9,6 +9,7 @@ on:
 jobs:
   build-and-dockerize:
     runs-on: ubuntu-latest
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -24,17 +25,18 @@ jobs:
     - name: Run tests
       run: npm test
 
-    - name: Build Docker image
-      run: |
-        docker buildx create --use
-        docker buildx build --platform linux/arm64 -t ${{ secrets.DOCKERHUB_USERNAME }}/whatsapp-api:arm-64 --push .
-
-    - name: Login to DockerHub
+    - name: 🔐 Login to DockerHub
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    - name: Push Docker image
+    - name: Build and Push Docker image (multi-platform)
       run: |
-        docker push ${{ secrets.DOCKERHUB_USERNAME }}/whatsapp-api:latest
+        docker buildx create --use
+        docker buildx build \
+          --platform linux/arm64 \
+          --tag ${{ secrets.DOCKERHUB_USERNAME }}/whatsapp-api:latest \
+          --tag ${{ secrets.DOCKERHUB_USERNAME }}/whatsapp-api:arm-64 \
+          --push \
+          .
