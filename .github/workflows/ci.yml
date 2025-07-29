@@ -26,7 +26,7 @@ jobs:
 
     - name: Build Docker image
       run: |
-        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/whatsapp-api:${{ github.sha }} .
+        docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/whatsapp-api:latest .
 
     - name: Login to DockerHub
       uses: docker/login-action@v3
@@ -36,4 +36,4 @@ jobs:
 
     - name: Push Docker image
       run: |
-        docker push ${{ secrets.DOCKERHUB_USERNAME }}/whatsapp-api:${{ github.sha }}
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/whatsapp-api:latest
