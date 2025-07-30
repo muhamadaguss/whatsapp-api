@@ -179,7 +179,10 @@ const validateContentType = (req, res, next) => {
   const contentLength = req.get("Content-Length");
 
   // Skip validation for PATCH requests with no body (Content-Length: 0 or undefined)
-  if (req.method === "PATCH" && (!contentLength || contentLength === "0")) {
+  if (
+    ["PATCH", "POST"].includes(req.method) &&
+    (!contentLength || contentLength === "0")
+  ) {
     return next();
   }
 
