@@ -37,7 +37,6 @@ const {
 } = require("./utils/dbHealthCheck");
 const SecurityUtils = require("./utils/security");
 const FileCleanupManager = require("./utils/fileCleanup");
-const GracefulShutdownManager = require("./utils/gracefulShutdown");
 const {
   requestLogger,
   securityHeaders,
@@ -46,18 +45,9 @@ const {
   validateContentType,
   validateRequestSize,
 } = require("./middleware/securityMiddleware");
-const {
-  shutdownMiddleware,
-  requestTrackingMiddleware,
-  shutdownHeadersMiddleware,
-} = require("./middleware/shutdownMiddleware");
 
 const app = express();
 const port = envConfig.PORT;
-
-// Initialize graceful shutdown manager
-const shutdownManager = new GracefulShutdownManager();
-shutdownManager.setShutdownTimeout(30000); // 30 seconds
 
 // Initialize file cleanup manager
 const fileCleanup = new FileCleanupManager({
@@ -102,10 +92,7 @@ app.use(validateContentType);
 app.use(validateRequestSize("10mb"));
 app.use(sanitizeInput);
 
-// Shutdown handling middleware
-app.use(shutdownHeadersMiddleware(shutdownManager));
-app.use(requestTrackingMiddleware(shutdownManager));
-app.use(shutdownMiddleware(shutdownManager));
+// Removed shutdown handling middleware
 
 // Rate limiting
 app.set("trust proxy", 1);
@@ -179,22 +166,7 @@ app.get("/ready", async (req, res) => {
   }
 });
 
-// Shutdown status endpoint
-app.get("/shutdown/status", (req, res) => {
-  try {
-    const healthCheck = shutdownManager.healthCheck();
-    res.status(200).json({
-      status: "success",
-      data: healthCheck,
-      timestamp: new Date().toISOString(),
-    });
-  } catch (error) {
-    res.status(500).json({
-      status: "error",
-      message: error.message,
-    });
-  }
-});
+// Removed shutdown status endpoint
 
 // File cleanup management endpoints
 app.get("/cleanup/stats", async (req, res) => {
@@ -299,20 +271,12 @@ async function startApplication() {
     fileCleanup.startAutoCleanup();
     logger.info("🧹 File cleanup manager started");
 
-    // Register shutdown handlers
-    registerShutdownHandlers();
-
     // Start the server
     server.listen(port, () => {
       logger.info(`🚀 Server running at http://localhost:${port}`);
       logger.info(`🌍 Environment: ${envConfig.NODE_ENV}`);
       logger.info(`📊 Process ID: ${process.pid}`);
       logger.info("✅ Application startup completed");
-
-      // Track server connections for graceful shutdown
-      server.on("connection", (connection) => {
-        shutdownManager.trackConnection(connection);
-      });
     });
   } catch (error) {
     logger.error("💥 Application startup failed:", error.message);
@@ -322,88 +286,18 @@ async function startApplication() {
   }
 }
 
-// Register shutdown handlers
-function registerShutdownHandlers() {
-  // Priority 10: Stop accepting new connections
-  shutdownManager.registerHandler(
-    "http-server",
-    async () => {
-      return new Promise((resolve, reject) => {
-        server.close((err) => {
-          if (err) {
-            logger.error("❌ Error during server shutdown:", err);
-            reject(err);
-          } else {
-            logger.info("🔌 HTTP server closed");
-            resolve();
-          }
-        });
-      });
-    },
-    10
-  );
+// Removed shutdown handlers
 
-  // Priority 20: Stop Socket.IO
-  shutdownManager.registerHandler(
-    "socket-io",
-    async () => {
-      return new Promise((resolve) => {
-        if (io) {
-          io.close(() => {
-            logger.info("🔌 Socket.IO server closed");
-            resolve();
-          });
-        } else {
-          resolve();
-        }
-      });
-    },
-    20
-  );
+// Basic error handling (non-graceful)
+process.on("uncaughtException", (error) => {
+  logger.error("💥 Uncaught Exception:", error);
+  // Don't exit, just log the error
+});
 
-  // Priority 30: Stop file cleanup manager
-  shutdownManager.registerHandler(
-    "file-cleanup",
-    async () => {
-      fileCleanup.stopAutoCleanup();
-      logger.info("🧹 File cleanup manager stopped");
-    },
-    30
-  );
-
-  // Priority 40: Stop database health checks
-  shutdownManager.registerHandler(
-    "db-health-check",
-    async () => {
-      dbHealthCheck.stopPeriodicCheck();
-      logger.info("🏥 Database health check stopped");
-    },
-    40
-  );
-
-  // Priority 50: Close database connection
-  shutdownManager.registerHandler(
-    "database",
-    async () => {
-      await sequelize.close();
-      logger.info("🗄️ Database connection closed");
-    },
-    50
-  );
-
-  // Priority 60: Final cleanup
-  shutdownManager.registerHandler(
-    "final-cleanup",
-    async () => {
-      // Any final cleanup tasks
-      logger.info("🧹 Final cleanup completed");
-    },
-    60
-  );
-
-  // Setup signal handlers
-  shutdownManager.setupSignalHandlers();
-}
+process.on("unhandledRejection", (reason, promise) => {
+  logger.error("💥 Unhandled Rejection at:", promise, "reason:", reason);
+  // Don't exit, just log the error
+});
 
 // Start the application
 startApplication();
