@@ -295,7 +295,14 @@ process.on("uncaughtException", (error) => {
 });
 
 process.on("unhandledRejection", (reason, promise) => {
-  logger.error("💥 Unhandled Rejection at:", promise, "reason:", reason);
+  logger.error("💥 Unhandled Rejection Details:", {
+    promise: promise,
+    reason: reason,
+    stack: reason?.stack || "No stack trace",
+    type: typeof reason,
+    message: reason?.message || "No message",
+    code: reason?.code || "No code",
+  });
   // Don't exit, just log the error
 });
 
