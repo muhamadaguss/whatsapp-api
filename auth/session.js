@@ -22,9 +22,42 @@ const statusPriority = {
   read: 3,
 };
 
+// Helper function to ensure sessions directory exists with proper permissions
+function ensureSessionsDirectory() {
+  const sessionsDir = path.resolve("./sessions");
+  try {
+    if (!fs.existsSync(sessionsDir)) {
+      fs.mkdirSync(sessionsDir, { recursive: true, mode: 0o755 });
+      logger.info(`📁 Created sessions directory: ${sessionsDir}`);
+    }
+  } catch (err) {
+    logger.error(`❌ Failed to create sessions directory:`, err.message);
+  }
+}
+
+// Helper function to check if we can write to a directory
+function canWriteToDirectory(dirPath) {
+  try {
+    fs.accessSync(dirPath, fs.constants.W_OK);
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
 async function startWhatsApp(sessionId, userId = null) {
   const io = getSocket();
+
+  // Ensure sessions directory exists
+  ensureSessionsDirectory();
+
   const sessionFolder = path.resolve(`./sessions/${sessionId}`);
+
+  // Check if we can write to sessions directory
+  const sessionsDir = path.resolve("./sessions");
+  if (!canWriteToDirectory(sessionsDir)) {
+    logger.warn(`⚠️ Cannot write to sessions directory: ${sessionsDir}`);
+  }
 
   // Reuse active session if already connected
   const existingSession = sessions[sessionId];
@@ -235,8 +268,36 @@ function cleanupSession(sessionId, userId = null) {
   try {
     const sessionDir = path.resolve(`./sessions/${sessionId}`);
     if (fs.existsSync(sessionDir)) {
-      fs.rmSync(sessionDir, { recursive: true, force: true });
-      logger.info(`🗑️ Session folder ${sessionId} deleted`);
+      // Try to delete individual files first, then the directory
+      try {
+        const files = fs.readdirSync(sessionDir);
+        for (const file of files) {
+          const filePath = path.join(sessionDir, file);
+          try {
+            fs.unlinkSync(filePath);
+          } catch (fileErr) {
+            logger.warn(
+              `⚠️ Could not delete file ${filePath}: ${fileErr.message}`
+            );
+          }
+        }
+
+        // Try to remove the directory
+        fs.rmdirSync(sessionDir);
+        logger.info(`🗑️ Session folder ${sessionId} deleted`);
+      } catch (dirErr) {
+        // If directory deletion fails, try with force option
+        try {
+          fs.rmSync(sessionDir, { recursive: true, force: true });
+          logger.info(`🗑️ Session folder ${sessionId} force deleted`);
+        } catch (forceErr) {
+          logger.error(
+            `❌ Failed to force delete session folder ${sessionId}: ${forceErr.message}`
+          );
+          // Continue execution even if deletion fails
+        }
+      }
+
       deleteSessionFromDB(sessionId, userId).catch((err) => {
         logger.error(`❌ Error deleting session from DB:`, err);
       });
@@ -246,13 +307,27 @@ function cleanupSession(sessionId, userId = null) {
       `❌ Failed to delete session folder ${sessionId}:`,
       err.message
     );
+    // Log additional details for debugging
+    logger.error(
+      `Session folder path: ${path.resolve(`./sessions/${sessionId}`)}`
+    );
+    logger.error(`Error details:`, {
+      code: err.code,
+      errno: err.errno,
+      syscall: err.syscall,
+      path: err.path,
+    });
   }
 
+  // Always cleanup memory references regardless of file deletion success
   delete sessions[sessionId];
   delete qrWaiters[sessionId];
 }
 
 async function loadExistingSessions(userId = null) {
+  // Ensure sessions directory exists
+  ensureSessionsDirectory();
+
   const sessionsDir = path.resolve("./sessions");
 
   if (!fs.existsSync(sessionsDir)) return;
