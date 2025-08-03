@@ -53,6 +53,32 @@ const sendMessageWA = asyncHandler(async (req, res) => {
   const result = await sock.sendMessage(phone + "@s.whatsapp.net", {
     text: message,
   });
+
+  // Save message status to database
+  try {
+    const MessageStatusModel = require("../models/messageStatusModel");
+    await MessageStatusModel.upsert({
+      messageId: result.key.id,
+      phone: phone.replace(/\D/g, ""),
+      status: "sent",
+      userId: req.user?.id,
+      sessionId,
+      message,
+      deliveredAt: new Date(),
+      readAt: null,
+    });
+    logger.info(`💾 Status pesan disimpan ke database untuk ${phone}`);
+  } catch (dbError) {
+    logger.error(`❌ Gagal simpan status ke database untuk ${phone}:`, {
+      error: dbError.message,
+      messageId: result.key.id,
+      phone,
+      userId: req.user?.id,
+      sessionId,
+    });
+    // Jangan throw error, response tetap success
+  }
+
   return res.status(200).json({ status: "success", result });
 });
 

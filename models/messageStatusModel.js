@@ -35,6 +35,10 @@ const MessageStatus = sequelize.define(
       type: DataTypes.DATE,
       allowNull: true,
     },
+    userId: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+    },
   },
   {
     timestamps: true,

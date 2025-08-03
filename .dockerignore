@@ -41,5 +41,5 @@ temp
 *.rar
 
 # Specific to this project
-sessions/*
+# sessions/* - commented out to preserve existing sessions
 uploads/*

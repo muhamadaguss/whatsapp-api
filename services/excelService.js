@@ -162,16 +162,28 @@ async function processExcelAndSendMessages(
           `✅ Pesan terkirim ke: ${phone}, messageId: ${sentMsg.key.id}`
         );
 
-        await MessageStatusModel.upsert({
-          messageId: sentMsg.key.id,
-          phone,
-          status: "sent",
-          userId,
-          sessionId,
-          message,
-          deliveredAt: new Date(),
-          readAt: null,
-        });
+        try {
+          await MessageStatusModel.upsert({
+            messageId: sentMsg.key.id,
+            phone,
+            status: "sent",
+            userId,
+            sessionId,
+            message,
+            deliveredAt: new Date(),
+            readAt: null,
+          });
+          logger.info(`💾 Status pesan disimpan ke database untuk ${phone}`);
+        } catch (dbError) {
+          logger.error(`❌ Gagal simpan status ke database untuk ${phone}:`, {
+            error: dbError.message,
+            messageId: sentMsg.key.id,
+            phone,
+            userId,
+            sessionId,
+          });
+          // Jangan throw error, biarkan proses blast lanjut
+        }
 
         results.push({ phone, status: "success", messageId: sentMsg.key.id });
         resultsSocket.success++;

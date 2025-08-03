@@ -45,10 +45,26 @@ async function startWhatsApp(sessionId, userId = null) {
   sessions[sessionId] = { sock, qr: null };
 
   sock.ev.on("creds.update", saveCreds);
-  sock.ev.on("connection.update", (update) =>
-    handleConnectionUpdate(update, sessionId, sock, userId, io)
-  );
-  sock.ev.on("messages.upsert", async (msgUpdate) => {
+  sock.ev.on("connection.update", (update) => {
+    handleConnectionUpdate(update, sessionId, sock, userId, io).catch((err) => {
+      logger.error(
+        `❌ Error in connection update for session ${sessionId}:`,
+        err
+      );
+    });
+  });
+  sock.ev.on("messages.upsert", (msgUpdate) => {
+    handleMessagesUpsert(msgUpdate, sessionId).catch((err) => {
+      logger.error(
+        `❌ Error handling messages upsert for session ${sessionId}:`,
+        err
+      );
+    });
+  });
+}
+
+async function handleMessagesUpsert(msgUpdate, sessionId) {
+  try {
     const messages = msgUpdate.messages;
 
     for (const msg of messages) {
@@ -71,26 +87,49 @@ async function startWhatsApp(sessionId, userId = null) {
       const isPrivateChat = remoteJid.endsWith("@s.whatsapp.net");
 
       if (isPrivateChat && text !== "[Non-text message]") {
-        // Simpan ke database jika perlu
-        await ChatMessageModel.create({
-          sessionId,
-          from,
-          text,
-          timestamp: new Date(Number(msg.messageTimestamp) * 1000),
-          fromMe: isFromMe,
-        });
-        // Kirim notifikasi ke frontend via Socket.io
-        const io = getSocket();
-        io.emit("new_message", {
-          sessionId,
-          from,
-          text,
-          timestamp: new Date(Number(msg.messageTimestamp) * 1000),
-          fromMe: isFromMe,
-        });
+        try {
+          // Validasi data sebelum insert
+          const messageData = {
+            sessionId: sessionId || "unknown",
+            from: from || "unknown",
+            text: text || "",
+            timestamp: msg.messageTimestamp
+              ? new Date(Number(msg.messageTimestamp) * 1000)
+              : new Date(),
+            fromMe: Boolean(isFromMe),
+          };
+
+          // Simpan ke database jika perlu
+          await ChatMessageModel.create(messageData);
+
+          // Kirim notifikasi ke frontend via Socket.io
+          const io = getSocket();
+          io.emit("new_message", {
+            sessionId,
+            from,
+            text,
+            timestamp: new Date(Number(msg.messageTimestamp) * 1000),
+            fromMe: isFromMe,
+          });
+          logger.info(`💾 Chat message saved to database from ${from}`);
+        } catch (dbError) {
+          logger.error(`❌ Error saving chat message to database:`, {
+            error: dbError.message,
+            sessionId,
+            from,
+            text: text?.substring(0, 50) + "...",
+            timestamp: msg.messageTimestamp,
+            fromMe: isFromMe,
+            constraint: dbError.original?.constraint || "unknown",
+            detail: dbError.original?.detail || "no detail",
+          });
+        }
       }
     }
-  });
+  } catch (error) {
+    logger.error(`❌ Error in handleMessagesUpsert:`, error);
+    throw error;
+  }
 }
 
 async function handleConnectionUpdate(update, sessionId, sock, userId, io) {
@@ -172,7 +211,11 @@ async function handleDisconnect(lastDisconnect, sessionId, userId) {
 
   if (AUTO_RECONNECT_REASONS.includes(statusCode)) {
     logger.info(`🔄 Attempting to reconnect session ${sessionId}`);
-    await startWhatsApp(sessionId, userId);
+    try {
+      await startWhatsApp(sessionId, userId);
+    } catch (err) {
+      logger.error(`❌ Failed to reconnect session ${sessionId}:`, err);
+    }
   } else if (DO_NOT_RECONNECT_REASONS.includes(statusCode)) {
     logger.info(`❌ Session ${sessionId} requires logout/cleanup`);
     cleanupSession(sessionId, userId);
@@ -180,7 +223,11 @@ async function handleDisconnect(lastDisconnect, sessionId, userId) {
     logger.warn(
       `⚠️ Unknown disconnect reason for session ${sessionId}: ${statusCode}. Safe reconnect.`
     );
-    await startWhatsApp(sessionId, userId);
+    try {
+      await startWhatsApp(sessionId, userId);
+    } catch (err) {
+      logger.error(`❌ Failed to reconnect session ${sessionId}:`, err);
+    }
   }
 }
 
@@ -190,7 +237,9 @@ function cleanupSession(sessionId, userId = null) {
     if (fs.existsSync(sessionDir)) {
       fs.rmSync(sessionDir, { recursive: true, force: true });
       logger.info(`🗑️ Session folder ${sessionId} deleted`);
-      deleteSessionFromDB(sessionId, userId);
+      deleteSessionFromDB(sessionId, userId).catch((err) => {
+        logger.error(`❌ Error deleting session from DB:`, err);
+      });
     }
   } catch (err) {
     logger.error(
@@ -211,12 +260,16 @@ async function loadExistingSessions(userId = null) {
   const sessionFolders = fs.readdirSync(sessionsDir);
 
   for (const sessionId of sessionFolders) {
-    const sessionPath = path.join(sessionsDir, sessionId);
-    const stat = fs.statSync(sessionPath);
+    try {
+      const sessionPath = path.join(sessionsDir, sessionId);
+      const stat = fs.statSync(sessionPath);
 
-    if (stat.isDirectory()) {
-      logger.info(`🔄 Memuat ulang session: ${sessionId}`);
-      await startWhatsApp(sessionId, userId);
+      if (stat.isDirectory()) {
+        logger.info(`🔄 Memuat ulang session: ${sessionId}`);
+        await startWhatsApp(sessionId, userId);
+      }
+    } catch (err) {
+      logger.error(`❌ Failed to load session ${sessionId}:`, err);
     }
   }
 }
