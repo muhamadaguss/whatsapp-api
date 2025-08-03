@@ -31,9 +31,9 @@ COPY --from=builder --chown=nodejs:nodejs /app ./
 
 # Create necessary directories and set permissions
 USER root
-RUN mkdir -p sessions uploads && \
-    chown -R nodejs:nodejs /app/sessions /app/uploads && \
-    chmod -R 755 /app/sessions /app/uploads
+RUN mkdir -p sessions uploads logs temp && \
+    chown -R nodejs:nodejs /app/sessions /app/uploads /app/logs /app/temp && \
+    chmod -R 755 /app/sessions /app/uploads /app/logs /app/temp
 USER nodejs
 
 # Expose port and run the application

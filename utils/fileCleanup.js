@@ -1,4 +1,5 @@
 const fs = require("fs").promises;
+const fsSync = require("fs");
 const path = require("path");
 const logger = require("./logger");
 
@@ -181,6 +182,17 @@ class FileCleanupManager {
 
     try {
       await this.ensureDirectoryExists(logsDir);
+
+      // Check if we can access the directory
+      try {
+        await fs.access(logsDir, fsSync.constants.R_OK | fsSync.constants.W_OK);
+      } catch (accessError) {
+        logger.warn(
+          `Cannot access logs directory ${logsDir}: ${accessError.message}`
+        );
+        return; // Skip cleanup for this directory
+      }
+
       const files = await this.getFilesInDirectory(logsDir);
 
       for (const file of files) {
@@ -195,9 +207,13 @@ class FileCleanupManager {
           await this.deleteFile(filePath, file.size, results, "old log file");
         }
       }
+
+      logger.debug(
+        `✅ Logs directory cleanup completed: ${files.length} files processed`
+      );
     } catch (error) {
       results.errors.push(`Logs cleanup error: ${error.message}`);
-      logger.error("Error cleaning logs directory:", error);
+      logger.warn(`⚠️ Error cleaning logs directory: ${error.message}`);
     }
   }
 
@@ -247,6 +263,17 @@ class FileCleanupManager {
 
     try {
       await this.ensureDirectoryExists(tempDir);
+
+      // Check if we can access the directory
+      try {
+        await fs.access(tempDir, fsSync.constants.R_OK | fsSync.constants.W_OK);
+      } catch (accessError) {
+        logger.warn(
+          `Cannot access temp directory ${tempDir}: ${accessError.message}`
+        );
+        return; // Skip cleanup for this directory
+      }
+
       const files = await this.getFilesInDirectory(tempDir);
 
       for (const file of files) {
@@ -258,9 +285,13 @@ class FileCleanupManager {
           await this.deleteFile(filePath, file.size, results, "temp file");
         }
       }
+
+      logger.debug(
+        `✅ Temp directory cleanup completed: ${files.length} files processed`
+      );
     } catch (error) {
       results.errors.push(`Temp cleanup error: ${error.message}`);
-      logger.error("Error cleaning temp directory:", error);
+      logger.warn(`⚠️ Error cleaning temp directory: ${error.message}`);
     }
   }
 
@@ -401,8 +432,18 @@ class FileCleanupManager {
       await fs.access(dirPath);
     } catch (error) {
       if (error.code === "ENOENT") {
-        await fs.mkdir(dirPath, { recursive: true });
-        logger.debug(`Created directory: ${dirPath}`);
+        try {
+          await fs.mkdir(dirPath, { recursive: true, mode: 0o755 });
+          logger.debug(`📁 Created directory: ${dirPath}`);
+        } catch (mkdirError) {
+          logger.warn(
+            `⚠️ Could not create directory ${dirPath}: ${mkdirError.message}`
+          );
+          throw mkdirError;
+        }
+      } else if (error.code === "EACCES") {
+        logger.warn(`⚠️ Permission denied accessing directory: ${dirPath}`);
+        throw error;
       } else {
         throw error;
       }

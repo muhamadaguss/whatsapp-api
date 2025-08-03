@@ -351,7 +351,7 @@ async function loadExistingSessions(userId = null) {
 
 async function deleteSessionFromDB(sessionId, userId = null) {
   try {
-    const updateData = { sessionId, status: "logout", phoneNumber: null };
+    const updateData = { sessionId, status: "logout" };
 
     // Only include userId in the update if it's not null
     if (userId !== null) {
