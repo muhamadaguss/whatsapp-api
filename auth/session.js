@@ -22,6 +22,28 @@ const statusPriority = {
   read: 3,
 };
 
+// Helper function to get readable status code description
+function getStatusCodeDescription(statusCode) {
+  const statusDescriptions = {
+    [DisconnectReason.connectionClosed]: "Koneksi ditutup",
+    [DisconnectReason.connectionLost]: "Koneksi terputus",
+    [DisconnectReason.connectionReplaced]:
+      "Koneksi digantikan oleh perangkat lain",
+    [DisconnectReason.timedOut]: "Koneksi timeout",
+    [DisconnectReason.restartRequired]: "Perlu restart",
+    [DisconnectReason.unavailableService]: "Layanan tidak tersedia",
+    [DisconnectReason.loggedOut]: "Logout dari WhatsApp",
+    [DisconnectReason.badSession]: "Sesi tidak valid",
+    [DisconnectReason.multideviceMismatch]: "Ketidakcocokan multi-device",
+    [DisconnectReason.forbidden]: "Akses ditolak/diblokir",
+  };
+
+  const description = statusDescriptions[statusCode];
+  return description
+    ? `${statusCode} (${description})`
+    : `${statusCode} (Status tidak dikenal)`;
+}
+
 // Helper function to ensure sessions directory exists with proper permissions
 function ensureSessionsDirectory() {
   const sessionsDir = path.resolve("./sessions");
@@ -222,8 +244,9 @@ async function handleConnected(sock, sessionId, userId, io) {
 
 async function handleDisconnect(lastDisconnect, sessionId, userId) {
   const statusCode = lastDisconnect?.error?.output?.statusCode;
+  const statusDescription = getStatusCodeDescription(statusCode);
   logger.info(
-    `🔄 Connection closed for session ${sessionId}, reason: ${statusCode}`
+    `🔄 Connection closed for session ${sessionId}, reason: ${statusDescription}`
   );
 
   const AUTO_RECONNECT_REASONS = [
