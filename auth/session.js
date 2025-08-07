@@ -123,123 +123,219 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
     const messages = msgUpdate.messages;
 
     for (const msg of messages) {
-      if (!msg.message) continue; // Skip if no message content
+      try {
+        if (!msg.message) continue; // Skip if no message content
 
-      const from = msg.key.remoteJid;
-      const isFromMe = msg.key.fromMe;
-      const text =
-        msg.message?.conversation ||
-        msg.message?.extendedTextMessage?.text ||
-        msg.message?.imageMessage?.caption ||
-        msg.message?.videoMessage?.caption ||
-        "[Non-text message]";
+        const from = msg.key.remoteJid;
+        const isFromMe = msg.key.fromMe;
+        const text =
+          msg.message?.conversation ||
+          msg.message?.extendedTextMessage?.text ||
+          msg.message?.imageMessage?.caption ||
+          msg.message?.videoMessage?.caption ||
+          "[Non-text message]";
 
-      logger.info(`📩 Chat from ${from}: ${text}`);
+        logger.info(`📩 Chat from ${from}: ${text}`);
 
-      const remoteJid = msg.key.remoteJid;
+        const remoteJid = msg.key.remoteJid;
 
-      // Filter hanya untuk kontak pribadi (bukan grup dan bukan newsletter)
-      const isPrivateChat = remoteJid.endsWith("@s.whatsapp.net");
+        // Filter hanya untuk kontak pribadi (bukan grup dan bukan newsletter)
+        const isPrivateChat = remoteJid.endsWith("@s.whatsapp.net");
 
-      if (isPrivateChat && text !== "[Non-text message]") {
-        try {
-          // Validasi data sebelum insert
-          const messageData = {
-            sessionId: sessionId || "unknown",
-            from: from || "unknown",
-            text: text || "",
-            timestamp: msg.messageTimestamp
-              ? new Date(Number(msg.messageTimestamp) * 1000)
-              : new Date(),
-            fromMe: Boolean(isFromMe),
-          };
+        if (isPrivateChat && text !== "[Non-text message]") {
+          try {
+            // Validasi data sebelum insert
+            const messageData = {
+              sessionId: sessionId || "unknown",
+              from: from || "unknown",
+              text: text || "",
+              timestamp: msg.messageTimestamp
+                ? new Date(Number(msg.messageTimestamp) * 1000)
+                : new Date(),
+              fromMe: Boolean(isFromMe),
+            };
 
-          // Simpan ke database jika perlu
-          await ChatMessageModel.create(messageData);
+            // Simpan ke database jika perlu
+            await ChatMessageModel.create(messageData);
 
-          // Kirim notifikasi ke frontend via Socket.io
-          const io = getSocket();
-          io.emit("new_message", {
-            sessionId,
-            from,
-            text,
-            timestamp: new Date(Number(msg.messageTimestamp) * 1000),
-            fromMe: isFromMe,
-          });
-          logger.info(`💾 Chat message saved to database from ${from}`);
-        } catch (dbError) {
-          logger.error(`❌ Error saving chat message to database:`, {
-            error: dbError.message,
-            sessionId,
-            from,
-            text: text?.substring(0, 50) + "...",
-            timestamp: msg.messageTimestamp,
-            fromMe: isFromMe,
-            constraint: dbError.original?.constraint || "unknown",
-            detail: dbError.original?.detail || "no detail",
-          });
+            // Kirim notifikasi ke frontend via Socket.io
+            const io = getSocket();
+            io.emit("new_message", {
+              sessionId,
+              from,
+              text,
+              timestamp: new Date(Number(msg.messageTimestamp) * 1000),
+              fromMe: isFromMe,
+            });
+            logger.info(`💾 Chat message saved to database from ${from}`);
+          } catch (dbError) {
+            logger.error(`❌ Error saving chat message to database:`, {
+              error: dbError.message,
+              sessionId,
+              from,
+              text: text?.substring(0, 50) + "...",
+              timestamp: msg.messageTimestamp,
+              fromMe: isFromMe,
+              constraint: dbError.original?.constraint || "unknown",
+              detail: dbError.original?.detail || "no detail",
+            });
+          }
         }
+      } catch (msgError) {
+        logger.error(`❌ Error processing individual message:`, {
+          error: msgError.message,
+          sessionId,
+          messageKey: msg.key,
+          stack: msgError.stack,
+        });
+        // Continue processing other messages
       }
     }
   } catch (error) {
-    logger.error(`❌ Error in handleMessagesUpsert:`, error);
-    throw error;
+    logger.error(`❌ Error in handleMessagesUpsert:`, {
+      error: error.message,
+      sessionId,
+      stack: error.stack,
+    });
+    // Don't throw error to prevent session crash
   }
 }
 
 async function handleConnectionUpdate(update, sessionId, sock, userId, io) {
-  const { connection, lastDisconnect, qr } = update;
+  try {
+    const { connection, lastDisconnect, qr } = update;
 
-  if (qr) await handleQR(qr, sessionId, userId, io);
-  if (connection === "close") {
-    // sessions[sessionId].isConnected = false;
-    await handleDisconnect(lastDisconnect, sessionId, userId);
-  } else if (connection === "open") {
-    // sessions[sessionId].isConnected = true;
-    await handleConnected(sock, sessionId, userId, io);
+    logger.info(`🔄 Connection update for session ${sessionId}: ${connection}`);
+
+    if (qr) {
+      try {
+        await handleQR(qr, sessionId, userId, io);
+      } catch (qrError) {
+        logger.error(`❌ Error handling QR for session ${sessionId}:`, {
+          error: qrError.message,
+          stack: qrError.stack,
+        });
+        throw qrError;
+      }
+    }
+
+    if (connection === "close") {
+      try {
+        await handleDisconnect(lastDisconnect, sessionId, userId);
+      } catch (disconnectError) {
+        logger.error(`❌ Error handling disconnect for session ${sessionId}:`, {
+          error: disconnectError.message,
+          stack: disconnectError.stack,
+        });
+        throw disconnectError;
+      }
+    } else if (connection === "open") {
+      try {
+        await handleConnected(sock, sessionId, userId, io);
+      } catch (connectError) {
+        logger.error(`❌ Error handling connected for session ${sessionId}:`, {
+          error: connectError.message,
+          stack: connectError.stack,
+        });
+        throw connectError;
+      }
+    }
+  } catch (error) {
+    logger.error(
+      `❌ Error in handleConnectionUpdate for session ${sessionId}:`,
+      {
+        error: error.message,
+        connection: update?.connection,
+        hasQR: !!update?.qr,
+        hasLastDisconnect: !!update?.lastDisconnect,
+        stack: error.stack,
+      }
+    );
+    // Don't re-throw to prevent session crash
   }
 }
 
 async function handleQR(qr, sessionId, userId, io) {
-  const qrData = await QRCode.toDataURL(qr);
-  sessions[sessionId].qr = qrData;
+  try {
+    const qrData = await QRCode.toDataURL(qr);
 
-  logger.info(`🔄 QR Code updated for session ${sessionId}`);
+    // Ensure session exists before setting QR
+    if (!sessions[sessionId]) {
+      sessions[sessionId] = { sock: null, qr: null };
+    }
 
-  await SessionModel.upsert({
-    sessionId,
-    status: "pending",
-    userId,
-  });
+    sessions[sessionId].qr = qrData;
 
-  logger.info(`💾 Session ${sessionId} saved to DB`);
+    logger.info(`🔄 QR Code updated for session ${sessionId}`);
 
-  if (qrWaiters[sessionId]) {
-    qrWaiters[sessionId].forEach((resolve) => resolve(qrData));
-    delete qrWaiters[sessionId];
+    await SessionModel.upsert({
+      sessionId,
+      status: "pending",
+      userId,
+    });
+
+    logger.info(`💾 Session ${sessionId} saved to DB`);
+
+    if (qrWaiters[sessionId]) {
+      qrWaiters[sessionId].forEach((resolve) => resolve(qrData));
+      delete qrWaiters[sessionId];
+    }
+  } catch (error) {
+    logger.error(`❌ Error in handleQR for session ${sessionId}:`, {
+      error: error.message,
+      stack: error.stack,
+    });
+    throw error;
   }
 }
 
 async function handleConnected(sock, sessionId, userId, io) {
-  sessions[sessionId].qr = null;
+  try {
+    // Ensure session exists
+    if (!sessions[sessionId]) {
+      sessions[sessionId] = { sock: null, qr: null };
+    }
 
-  // Ambil userId dari DB jika belum tersedia
-  if (!userId) {
-    const session = await SessionModel.findOne({ where: { sessionId } });
-    userId = session?.userId || null;
+    sessions[sessionId].qr = null;
+
+    // Ambil userId dari DB jika belum tersedia
+    if (!userId) {
+      try {
+        const session = await SessionModel.findOne({ where: { sessionId } });
+        userId = session?.userId || null;
+      } catch (dbError) {
+        logger.warn(
+          `⚠️ Could not fetch userId from DB for session ${sessionId}:`,
+          dbError.message
+        );
+      }
+    }
+
+    // Validate sock.user exists
+    if (!sock.user || !sock.user.id) {
+      throw new Error("Socket user information is not available");
+    }
+
+    await SessionModel.upsert({
+      sessionId,
+      status: "connected",
+      userId,
+      phoneNumber: sock.user.id.split(":")[0],
+    });
+
+    logger.info(`🔄 Connection opened for session ${sessionId}`);
+    logger.info(`💾 Session ${sessionId} connected to DB`);
+
+    io.emit("qr_scanned", { sessionId, message: "QR Code Scanned" });
+  } catch (error) {
+    logger.error(`❌ Error in handleConnected for session ${sessionId}:`, {
+      error: error.message,
+      hasUser: !!sock?.user,
+      userId: sock?.user?.id,
+      stack: error.stack,
+    });
+    throw error;
   }
-
-  await SessionModel.upsert({
-    sessionId,
-    status: "connected",
-    userId,
-    phoneNumber: sock.user.id.split(":")[0],
-  });
-
-  logger.info(`🔄 Connection opened for session ${sessionId}`);
-  logger.info(`💾 Session ${sessionId} connected to DB`);
-
-  io.emit("qr_scanned", { sessionId, message: "QR Code Scanned" });
 }
 
 async function handleDisconnect(lastDisconnect, sessionId, userId) {
