@@ -4,6 +4,7 @@ const Blast = require("../models/blastModel");
 const User = require("../models/userModel");
 const logger = require("../utils/logger");
 const { asyncHandler, AppError } = require("../middleware/errorHandler");
+const MessageTypeClassifier = require("../utils/messageTypeClassifier");
 
 const historyCampaign = asyncHandler(async (req, res) => {
   const userId = req.user.id;
@@ -186,7 +187,7 @@ const getMessageTrends = asyncHandler(async (req, res) => {
         [Op.between]: [startDate, endDate],
       },
     },
-    group: [groupByExpression],
+    group: [groupByExpression, orderByExpression],
     order: [[orderByExpression, "ASC"]],
     raw: true,
   });
@@ -294,7 +295,10 @@ const getMessageTypePerformance = asyncHandler(async (req, res) => {
     raw: true,
   });
 
-  // Categorize messages by type based on content keywords
+  // Initialize message type classifier
+  const classifier = new MessageTypeClassifier();
+
+  // Categorize messages by type using advanced classifier
   const messageTypes = {
     Promo: { success: 0, failed: 0, total: 0 },
     Updates: { success: 0, failed: 0, total: 0 },
@@ -304,35 +308,8 @@ const getMessageTypePerformance = asyncHandler(async (req, res) => {
   };
 
   campaigns.forEach((campaign) => {
-    const template = campaign.messageTemplate.toLowerCase();
-    let category = "Support"; // default category
-
-    if (
-      template.includes("promo") ||
-      template.includes("diskon") ||
-      template.includes("sale") ||
-      template.includes("offer")
-    ) {
-      category = "Promo";
-    } else if (
-      template.includes("update") ||
-      template.includes("info") ||
-      template.includes("news")
-    ) {
-      category = "Updates";
-    } else if (
-      template.includes("reminder") ||
-      template.includes("ingat") ||
-      template.includes("deadline")
-    ) {
-      category = "Reminder";
-    } else if (
-      template.includes("welcome") ||
-      template.includes("selamat datang") ||
-      template.includes("halo")
-    ) {
-      category = "Welcome";
-    }
+    // Use advanced classifier instead of simple keyword matching
+    const category = classifier.classify(campaign.messageTemplate);
 
     messageTypes[category].success += campaign.sentCount || 0;
     messageTypes[category].failed += campaign.failedCount || 0;

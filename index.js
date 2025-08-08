@@ -215,6 +215,7 @@ app.use("/menus", menuRoutes);
 app.use("/templates", templateRoutes);
 app.use("/chats", chatsRoutes);
 app.use("/cleanup", cleanupRoutes);
+app.use("/classifier", require("./routes/classifierRoutes"));
 
 // Error handling middleware (harus di akhir setelah semua routes)
 app.use(notFound); // 404 handler
