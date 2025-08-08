@@ -74,10 +74,11 @@ async function startWhatsApp(sessionId, userId = null) {
   // Ensure sessions directory exists
   ensureSessionsDirectory();
 
-  const sessionFolder = path.resolve(`./sessions/${sessionId}`);
-
+  // const sessionFolder = path.resolve(`./sessions/${sessionId}`);
+  const sessionFolder = path.resolve(`/app/sessions/${sessionId}`);
   // Check if we can write to sessions directory
-  const sessionsDir = path.resolve("./sessions");
+  // const sessionsDir = path.resolve("./sessions");
+  const sessionsDir = path.resolve("/app/sessions");
   if (!canWriteToDirectory(sessionsDir)) {
     logger.warn(`⚠️ Cannot write to sessions directory: ${sessionsDir}`);
   }
