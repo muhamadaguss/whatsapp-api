@@ -153,6 +153,7 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
                 ? new Date(Number(msg.messageTimestamp) * 1000)
                 : new Date(),
               fromMe: Boolean(isFromMe),
+              isRead: Boolean(isFromMe), // Messages from me are automatically read
             };
 
             // Simpan ke database jika perlu
@@ -166,6 +167,7 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
               text,
               timestamp: new Date(Number(msg.messageTimestamp) * 1000),
               fromMe: isFromMe,
+              isRead: Boolean(isFromMe),
             });
             logger.info(`💾 Chat message saved to database from ${from}`);
           } catch (dbError) {

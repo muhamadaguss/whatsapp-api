@@ -30,6 +30,11 @@ const ChatMessage = sequelize.define(
       allowNull: false,
       defaultValue: false,
     },
+    isRead: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
   },
   {
     timestamps: true,

@@ -178,9 +178,9 @@ const validateContentType = (req, res, next) => {
   const contentType = req.get("Content-Type");
   const contentLength = req.get("Content-Length");
 
-  // Skip validation for PATCH requests with no body (Content-Length: 0 or undefined)
+  // Skip validation for PATCH, PUT requests with no body (Content-Length: 0 or undefined)
   if (
-    ["PATCH", "POST"].includes(req.method) &&
+    ["PATCH", "POST", "PUT"].includes(req.method) &&
     (!contentLength || contentLength === "0")
   ) {
     return next();
@@ -203,6 +203,7 @@ const validateContentType = (req, res, next) => {
         method: req.method,
         url: req.url,
         ip: req.ip,
+        allowedTypes,
       },
       "Invalid content type"
     );
@@ -210,6 +211,12 @@ const validateContentType = (req, res, next) => {
     return res.status(400).json({
       status: "error",
       message: "Invalid content type",
+      details: {
+        received: contentType,
+        allowed: allowedTypes,
+        method: req.method,
+        contentLength,
+      },
     });
   }
 
