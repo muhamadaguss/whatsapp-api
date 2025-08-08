@@ -46,8 +46,8 @@ function getStatusCodeDescription(statusCode) {
 
 // Helper function to ensure sessions directory exists with proper permissions
 function ensureSessionsDirectory() {
-  // const sessionsDir = path.resolve("./sessions");
-  const sessionsDir = path.resolve("/app/sessions");
+  const sessionsDir = path.resolve("./sessions");
+  // const sessionsDir = path.resolve("/app/sessions");
   try {
     if (!fs.existsSync(sessionsDir)) {
       fs.mkdirSync(sessionsDir, { recursive: true, mode: 0o755 });
@@ -74,11 +74,11 @@ async function startWhatsApp(sessionId, userId = null) {
   // Ensure sessions directory exists
   ensureSessionsDirectory();
 
-  // const sessionFolder = path.resolve(`./sessions/${sessionId}`);
-  const sessionFolder = path.resolve(`/app/sessions/${sessionId}`);
+  const sessionFolder = path.resolve(`./sessions/${sessionId}`);
+  // const sessionFolder = path.resolve(`/app/sessions/${sessionId}`);
   // Check if we can write to sessions directory
-  // const sessionsDir = path.resolve("./sessions");
-  const sessionsDir = path.resolve("/app/sessions");
+  const sessionsDir = path.resolve("./sessions");
+  // const sessionsDir = path.resolve("/app/sessions");
   if (!canWriteToDirectory(sessionsDir)) {
     logger.warn(`⚠️ Cannot write to sessions directory: ${sessionsDir}`);
   }
@@ -150,6 +150,129 @@ async function getContactName(sock, jid) {
     logger.warn(`⚠️ Could not get contact name for ${jid}:`, error.message);
     // Fallback: return the original JID or phone number
     return jid.split("@")[0];
+  }
+}
+
+// Enhanced function to get detailed contact information
+async function getContactDetails(sock, jid) {
+  try {
+    const phoneNumber = jid.split("@")[0];
+    const contactDetails = {
+      jid: jid,
+      phoneNumber: phoneNumber,
+      name: phoneNumber, // Default fallback
+      profilePicture: null,
+      status: null,
+      businessProfile: null,
+      isOnWhatsApp: false,
+      lastSeen: null,
+      isBlocked: false,
+      isBusiness: false,
+      verifiedName: null,
+      pushName: null,
+    };
+
+    // Check if number is on WhatsApp
+    try {
+      const onWhatsAppResult = await sock.onWhatsApp(jid);
+      if (onWhatsAppResult && onWhatsAppResult.length > 0) {
+        contactDetails.isOnWhatsApp = true;
+        contactDetails.verifiedName = onWhatsAppResult[0].verifiedName || null;
+      }
+    } catch (error) {
+      logger.warn(`Could not check WhatsApp status for ${jid}:`, error.message);
+    }
+
+    // Get contact name from store
+    try {
+      const contact = sock.store?.contacts?.[jid];
+      if (contact) {
+        contactDetails.name = contact.name || contact.notify || phoneNumber;
+        contactDetails.pushName = contact.notify || null;
+      }
+    } catch (error) {
+      logger.warn(
+        `Could not get contact from store for ${jid}:`,
+        error.message
+      );
+    }
+
+    // Get profile picture
+    try {
+      const profilePicUrl = await sock.profilePictureUrl(jid, "image");
+      contactDetails.profilePicture = profilePicUrl;
+    } catch (error) {
+      // Profile picture might not exist, that's okay
+      logger.debug(`No profile picture for ${jid}`);
+    }
+
+    // Get status
+    try {
+      const status = await sock.fetchStatus(jid);
+      if (status && status.status) {
+        contactDetails.status = status.status;
+      }
+    } catch (error) {
+      // Status might be private, that's okay
+      logger.debug(`Could not fetch status for ${jid}`);
+    }
+
+    // Get business profile if it's a business account
+    try {
+      const businessProfile = await sock.getBusinessProfile(jid);
+      if (businessProfile) {
+        contactDetails.businessProfile = {
+          description: businessProfile.description || null,
+          category: businessProfile.category || null,
+          email: businessProfile.email || null,
+          website: businessProfile.website || null,
+          address: businessProfile.address || null,
+        };
+        contactDetails.isBusiness = true;
+        if (
+          businessProfile.description &&
+          !contactDetails.name.includes(businessProfile.description)
+        ) {
+          contactDetails.name = businessProfile.description;
+        }
+      }
+    } catch (error) {
+      // Not a business account, that's okay
+      logger.debug(`No business profile for ${jid}`);
+    }
+
+    // Get presence (last seen)
+    try {
+      await sock.presenceSubscribe(jid);
+      const presence = sock.store?.presences?.[jid];
+      if (presence) {
+        const lastSeen = presence.lastKnownPresence;
+        if (lastSeen && lastSeen !== "unavailable") {
+          contactDetails.lastSeen = lastSeen;
+        }
+      }
+    } catch (error) {
+      logger.debug(`Could not get presence for ${jid}`);
+    }
+
+    return contactDetails;
+  } catch (error) {
+    logger.error(`❌ Error getting contact details for ${jid}:`, error.message);
+    // Return basic fallback
+    return {
+      jid: jid,
+      phoneNumber: jid.split("@")[0],
+      name: jid.split("@")[0],
+      profilePicture: null,
+      status: null,
+      businessProfile: null,
+      isOnWhatsApp: false,
+      lastSeen: null,
+      isBlocked: false,
+      isBusiness: false,
+      verifiedName: null,
+      pushName: null,
+    };
   }
 }
 
@@ -562,4 +685,5 @@ module.exports = {
   cleanupSession,
   loadExistingSessions,
   deleteSessionFromDB,
+  getContactDetails,
 };

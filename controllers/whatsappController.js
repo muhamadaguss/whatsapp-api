@@ -180,10 +180,40 @@ const getActiveSessions = asyncHandler(async (req, res) => {
   });
 });
 
+const getContactDetails = asyncHandler(async (req, res) => {
+  const { sessionId, jid } = req.params;
+
+  const sock = getSock(sessionId);
+  if (!sock) {
+    throw new AppError(
+      `Session '${sessionId}' tidak ditemukan atau tidak aktif.`,
+      404
+    );
+  }
+
+  // Import the getContactDetails function from session.js
+  const {
+    getContactDetails: getContactDetailsFromSession,
+  } = require("../auth/session");
+
+  try {
+    const contactDetails = await getContactDetailsFromSession(sock, jid);
+
+    return res.status(200).json({
+      status: "success",
+      data: contactDetails,
+    });
+  } catch (error) {
+    logger.error(`❌ Error getting contact details for ${jid}:`, error.message);
+    throw new AppError("Gagal mengambil detail kontak", 500);
+  }
+});
+
 module.exports = {
   getQRImage,
   sendMessageWA,
   uploadExcel,
   logoutSession,
   getActiveSessions,
+  getContactDetails,
 };
