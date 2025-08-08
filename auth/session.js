@@ -46,7 +46,8 @@ function getStatusCodeDescription(statusCode) {
 
 // Helper function to ensure sessions directory exists with proper permissions
 function ensureSessionsDirectory() {
-  const sessionsDir = path.resolve("./sessions");
+  // const sessionsDir = path.resolve("./sessions");
+  const sessionsDir = path.resolve("/app/sessions");
   try {
     if (!fs.existsSync(sessionsDir)) {
       fs.mkdirSync(sessionsDir, { recursive: true, mode: 0o755 });
