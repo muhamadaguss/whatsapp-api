@@ -17,6 +17,10 @@ const ChatMessage = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
     },
+    contactName: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
     text: {
       type: DataTypes.TEXT,
       allowNull: false,

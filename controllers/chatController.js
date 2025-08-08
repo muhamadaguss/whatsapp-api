@@ -18,7 +18,8 @@ const getAllChats = asyncHandler(async (req, res) => {
     if (!groupedChats[chatKey]) {
       groupedChats[chatKey] = {
         id: null, // akan di-set nanti dengan format: `${sessionId}-${index}`
-        name: chat.from,
+        name: chat.contactName || chat.from, // Use contactName if available, fallback to JID
+        jid: chat.from, // Keep JID for reference
         messages: [],
       };
     }

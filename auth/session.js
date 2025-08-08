@@ -119,9 +119,43 @@ async function startWhatsApp(sessionId, userId = null) {
   });
 }
 
+// Helper function to get contact name
+async function getContactName(sock, jid) {
+  try {
+    // Try to get contact info from WhatsApp
+    const contactInfo = await sock.onWhatsApp(jid);
+    if (contactInfo && contactInfo.length > 0) {
+      // Get the contact name from the store
+      const contact = await sock.store?.contacts?.[jid];
+      if (contact && contact.name) {
+        return contact.name;
+      }
+
+      // Try to get from business profile
+      try {
+        const profile = await sock.getBusinessProfile(jid);
+        if (profile && profile.description) {
+          return profile.description;
+        }
+      } catch (profileError) {
+        // Ignore profile errors
+      }
+    }
+
+    // Fallback: extract phone number from JID
+    const phoneNumber = jid.split("@")[0];
+    return phoneNumber;
+  } catch (error) {
+    logger.warn(`⚠️ Could not get contact name for ${jid}:`, error.message);
+    // Fallback: return the original JID or phone number
+    return jid.split("@")[0];
+  }
+}
+
 async function handleMessagesUpsert(msgUpdate, sessionId) {
   try {
     const messages = msgUpdate.messages;
+    const sock = sessions[sessionId]?.sock;
 
     for (const msg of messages) {
       try {
@@ -136,7 +170,10 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
           msg.message?.videoMessage?.caption ||
           "[Non-text message]";
 
-        logger.info(`📩 Chat from ${from}: ${text}`);
+        // Get contact name instead of using JID
+        const contactName = isFromMe ? "Me" : await getContactName(sock, from);
+
+        logger.info(`📩 Chat from ${contactName} (${from}): ${text}`);
 
         const remoteJid = msg.key.remoteJid;
 
@@ -148,7 +185,8 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
             // Validasi data sebelum insert
             const messageData = {
               sessionId: sessionId || "unknown",
-              from: from || "unknown",
+              from: from || "unknown", // Keep JID for database consistency
+              contactName: contactName, // Add contact name field
               text: text || "",
               timestamp: msg.messageTimestamp
                 ? new Date(Number(msg.messageTimestamp) * 1000)
@@ -165,12 +203,15 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
             io.emit("new_message", {
               sessionId,
               from,
+              contactName, // Send contact name to frontend
               text,
               timestamp: new Date(Number(msg.messageTimestamp) * 1000),
               fromMe: isFromMe,
               isRead: Boolean(isFromMe),
             });
-            logger.info(`💾 Chat message saved to database from ${from}`);
+            logger.info(
+              `💾 Chat message saved to database from ${contactName} (${from})`
+            );
           } catch (dbError) {
             logger.error(`❌ Error saving chat message to database:`, {
               error: dbError.message,
