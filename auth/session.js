@@ -118,37 +118,122 @@ async function startWhatsApp(sessionId, userId = null) {
       );
     });
   });
+
+  // Listen for contact updates
+  sock.ev.on("contacts.update", (contactUpdates) => {
+    try {
+      for (const contact of contactUpdates) {
+        if (contact.id && contact.name) {
+          const cacheKey = `${sock.user?.id || "unknown"}_${contact.id}`;
+          contactNameCache.set(cacheKey, {
+            name: contact.name,
+            timestamp: Date.now(),
+          });
+          logger.info(`📱 Contact updated: ${contact.name} (${contact.id})`);
+        }
+      }
+    } catch (error) {
+      logger.error(
+        `❌ Error handling contact updates for session ${sessionId}:`,
+        error
+      );
+    }
+  });
+
+  // Listen for chats update (might contain contact names)
+  sock.ev.on("chats.update", (chatUpdates) => {
+    try {
+      for (const chat of chatUpdates) {
+        if (chat.id && chat.name && chat.id.endsWith("@s.whatsapp.net")) {
+          const cacheKey = `${sock.user?.id || "unknown"}_${chat.id}`;
+          contactNameCache.set(cacheKey, {
+            name: chat.name,
+            timestamp: Date.now(),
+          });
+          logger.info(`💬 Chat name updated: ${chat.name} (${chat.id})`);
+        }
+      }
+    } catch (error) {
+      logger.error(
+        `❌ Error handling chat updates for session ${sessionId}:`,
+        error
+      );
+    }
+  });
 }
 
 // Helper function to get contact name
 async function getContactName(sock, jid) {
   try {
-    // Try to get contact info from WhatsApp
-    const contactInfo = await sock.onWhatsApp(jid);
-    if (contactInfo && contactInfo.length > 0) {
-      // Get the contact name from the store
-      const contact = await sock.store?.contacts?.[jid];
-      if (contact && contact.name) {
-        return contact.name;
+    // Method 1: Try to get from contact store (most reliable)
+    if (sock.store && sock.store.contacts && sock.store.contacts[jid]) {
+      const contact = sock.store.contacts[jid];
+      if (contact.name && contact.name.trim()) {
+        logger.info(
+          `📱 Found contact name from store: ${contact.name} for ${jid}`
+        );
+        return contact.name.trim();
       }
+    }
 
-      // Try to get from business profile
-      try {
-        const profile = await sock.getBusinessProfile(jid);
-        if (profile && profile.description) {
-          return profile.description;
-        }
-      } catch (profileError) {
-        // Ignore profile errors
+    // Method 2: Try to get from chat metadata
+    if (sock.store && sock.store.chats) {
+      const chat = sock.store.chats[jid];
+      if (chat && chat.name && chat.name.trim()) {
+        logger.info(`💬 Found contact name from chat: ${chat.name} for ${jid}`);
+        return chat.name.trim();
       }
+    }
+
+    // Method 3: Try to get profile name (for individual contacts)
+    try {
+      const profile = await sock.fetchProfile(jid);
+      if (profile && profile.name && profile.name.trim()) {
+        logger.info(`👤 Found profile name: ${profile.name} for ${jid}`);
+        return profile.name.trim();
+      }
+    } catch (profileError) {
+      logger.debug(`Could not fetch profile for ${jid}:`, profileError.message);
+    }
+
+    // Method 4: Try business profile (for business accounts)
+    try {
+      const businessProfile = await sock.getBusinessProfile(jid);
+      if (
+        businessProfile &&
+        businessProfile.description &&
+        businessProfile.description.trim()
+      ) {
+        logger.info(
+          `🏢 Found business name: ${businessProfile.description} for ${jid}`
+        );
+        return businessProfile.description.trim();
+      }
+    } catch (businessError) {
+      logger.debug(
+        `Could not fetch business profile for ${jid}:`,
+        businessError.message
+      );
+    }
+
+    // Method 5: Try to get from presence (sometimes contains name)
+    try {
+      const presence = await sock.presenceSubscribe(jid);
+      // This is mainly for subscribing to presence updates, name might be available later
+    } catch (presenceError) {
+      logger.debug(
+        `Could not subscribe to presence for ${jid}:`,
+        presenceError.message
+      );
     }
 
     // Fallback: extract phone number from JID
     const phoneNumber = jid.split("@")[0];
+    logger.info(`📞 Using phone number as fallback: ${phoneNumber} for ${jid}`);
     return phoneNumber;
   } catch (error) {
-    logger.warn(`⚠️ Could not get contact name for ${jid}:`, error.message);
-    // Fallback: return the original JID or phone number
+    logger.warn(`⚠️ Error getting contact name for ${jid}:`, error.message);
+    // Fallback: return phone number
     return jid.split("@")[0];
   }
 }
@@ -276,6 +361,32 @@ async function getContactDetails(sock, jid) {
   }
 }
 
+// Cache for contact names to avoid repeated API calls
+const contactNameCache = new Map();
+const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
+
+// Enhanced function to get contact name with caching
+async function getContactNameWithCache(sock, jid) {
+  // Check cache first
+  const cacheKey = `${sock.user?.id || "unknown"}_${jid}`;
+  const cached = contactNameCache.get(cacheKey);
+
+  if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+    return cached.name;
+  }
+
+  // Get fresh contact name
+  const contactName = await getContactName(sock, jid);
+
+  // Cache the result
+  contactNameCache.set(cacheKey, {
+    name: contactName,
+    timestamp: Date.now(),
+  });
+
+  return contactName;
+}
+
 async function handleMessagesUpsert(msgUpdate, sessionId) {
   try {
     const messages = msgUpdate.messages;
@@ -294,8 +405,10 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
           msg.message?.videoMessage?.caption ||
           "[Non-text message]";
 
-        // Get contact name instead of using JID
-        const contactName = isFromMe ? "Me" : await getContactName(sock, from);
+        // Get contact name with caching
+        const contactName = isFromMe
+          ? "Me"
+          : await getContactNameWithCache(sock, from);
 
         logger.info(`📩 Chat from ${contactName} (${from}): ${text}`);
 
@@ -676,6 +789,78 @@ function getActiveSessionIds() {
   return Object.keys(sessions);
 }
 
+// Function to refresh contact names for a session
+async function refreshContactNames(sessionId) {
+  try {
+    const sock = sessions[sessionId]?.sock;
+    if (!sock) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+
+    logger.info(`🔄 Refreshing contact names for session ${sessionId}...`);
+
+    // Clear cache for this session
+    const sessionPrefix = `${sock.user?.id || "unknown"}_`;
+    for (const [key] of contactNameCache) {
+      if (key.startsWith(sessionPrefix)) {
+        contactNameCache.delete(key);
+      }
+    }
+
+    // Get all unique contacts from database
+    const uniqueContacts = await ChatMessageModel.findAll({
+      attributes: ["from"],
+      where: { sessionId },
+      group: ["from"],
+      raw: true,
+    });
+
+    let updatedCount = 0;
+    for (const contact of uniqueContacts) {
+      const jid = contact.from;
+      if (jid.endsWith("@s.whatsapp.net")) {
+        try {
+          const contactName = await getContactName(sock, jid);
+
+          // Update database records
+          await ChatMessageModel.update(
+            { contactName },
+            { where: { sessionId, from: jid } }
+          );
+
+          updatedCount++;
+          logger.info(`✅ Updated contact: ${contactName} (${jid})`);
+        } catch (error) {
+          logger.warn(`⚠️ Failed to update contact ${jid}:`, error.message);
+        }
+      }
+    }
+
+    logger.info(
+      `🎉 Contact refresh completed: ${updatedCount} contacts updated`
+    );
+    return { success: true, updatedCount };
+  } catch (error) {
+    logger.error(`❌ Error refreshing contact names:`, error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Function to get contact name for external use
+async function getContactNameForSession(sessionId, jid) {
+  try {
+    const sock = sessions[sessionId]?.sock;
+    if (!sock) {
+      throw new Error(`Session ${sessionId} not found`);
+    }
+
+    return await getContactNameWithCache(sock, jid);
+  } catch (error) {
+    logger.error(`❌ Error getting contact name:`, error);
+    return jid.split("@")[0]; // Fallback to phone number
+  }
+}
+
 module.exports = {
   startWhatsApp,
   getSock,
@@ -686,4 +871,6 @@ module.exports = {
   loadExistingSessions,
   deleteSessionFromDB,
   getContactDetails,
+  refreshContactNames,
+  getContactNameForSession,
 };

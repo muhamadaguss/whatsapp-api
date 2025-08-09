@@ -24,6 +24,7 @@ const userRoutes = require("./routes/userRoutes");
 const menuRoutes = require("./routes/menuRoutes");
 const templateRoutes = require("./routes/templateRoutes");
 const chatsRoutes = require("./routes/chatRoutes");
+const contactRoutes = require("./routes/contactRoutes");
 const cleanupRoutes = require("./routes/cleanupRoutes");
 const sequelize = require("./models/db");
 const { loadExistingSessions } = require("./auth/session");
@@ -214,6 +215,7 @@ app.use("/user", userRoutes);
 app.use("/menus", menuRoutes);
 app.use("/templates", templateRoutes);
 app.use("/chats", chatsRoutes);
+app.use("/contacts", contactRoutes);
 app.use("/cleanup", cleanupRoutes);
 app.use("/classifier", require("./routes/classifierRoutes"));
 
