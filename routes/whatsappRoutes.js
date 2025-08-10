@@ -10,6 +10,7 @@ const {
   logoutSession,
   getActiveSessions,
   getContactDetails,
+  getSessionHealth,
 } = require("../controllers/whatsappController");
 
 const storage = multer.diskStorage({
@@ -58,5 +59,6 @@ router.post(
 router.post("/logoutSession/:sessionId", verifyToken, logoutSession);
 router.get("/sessions", verifyToken, getActiveSessions);
 router.get("/contact-details/:sessionId/:jid", verifyToken, getContactDetails);
+router.get("/health/:sessionId", verifyToken, getSessionHealth);
 
 module.exports = router;

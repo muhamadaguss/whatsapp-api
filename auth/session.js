@@ -47,8 +47,8 @@ function getStatusCodeDescription(statusCode) {
 
 // Helper function to ensure sessions directory exists with proper permissions
 function ensureSessionsDirectory() {
-  const sessionsDir = path.resolve("./sessions");
-  // const sessionsDir = path.resolve("/app/sessions");
+  // const sessionsDir = path.resolve("./sessions");
+  const sessionsDir = path.resolve("/app/sessions");
   try {
     if (!fs.existsSync(sessionsDir)) {
       fs.mkdirSync(sessionsDir, { recursive: true, mode: 0o755 });
@@ -75,11 +75,11 @@ async function startWhatsApp(sessionId, userId = null) {
   // Ensure sessions directory exists
   ensureSessionsDirectory();
 
-  const sessionFolder = path.resolve(`./sessions/${sessionId}`);
-  // const sessionFolder = path.resolve(`/app/sessions/${sessionId}`);
+  // const sessionFolder = path.resolve(`./sessions/${sessionId}`);
+  const sessionFolder = path.resolve(`/app/sessions/${sessionId}`);
   // Check if we can write to sessions directory
-  const sessionsDir = path.resolve("./sessions");
-  // const sessionsDir = path.resolve("/app/sessions");
+  // const sessionsDir = path.resolve("./sessions");
+  const sessionsDir = path.resolve("/app/sessions");
   if (!canWriteToDirectory(sessionsDir)) {
     logger.warn(`⚠️ Cannot write to sessions directory: ${sessionsDir}`);
   }
@@ -111,6 +111,26 @@ async function startWhatsApp(sessionId, userId = null) {
       );
     });
   });
+
+  // Monitor WebSocket connection state
+  if (sock.ws) {
+    sock.ws.on("close", (code, reason) => {
+      logger.warn(
+        `🔌 WebSocket closed for session ${sessionId}: ${code} - ${reason}`
+      );
+    });
+
+    sock.ws.on("error", (error) => {
+      logger.error(
+        `❌ WebSocket error for session ${sessionId}:`,
+        error.message
+      );
+    });
+
+    sock.ws.on("open", () => {
+      logger.info(`✅ WebSocket opened for session ${sessionId}`);
+    });
+  }
   sock.ev.on("messages.upsert", (msgUpdate) => {
     handleMessagesUpsert(msgUpdate, sessionId).catch((err) => {
       logger.error(
@@ -432,7 +452,8 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
               );
 
               if (buffer && buffer.length > 0) {
-                const uploadsDir = path.join(__dirname, "../uploads");
+                // const uploadsDir = path.join(__dirname, "../uploads");
+                const uploadsDir = path.join(__dirname, "/app/uploads");
                 if (!fs.existsSync(uploadsDir)) {
                   fs.mkdirSync(uploadsDir, { recursive: true });
                   logger.info(`📁 Created uploads directory: ${uploadsDir}`);
@@ -452,7 +473,8 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
                 const filePath = path.join(uploadsDir, fileName);
 
                 fs.writeFileSync(filePath, buffer);
-                mediaUrl = `/uploads/${fileName}`;
+                // mediaUrl = `/uploads/${fileName}`;
+                mediaUrl = `app/uploads/${fileName}`;
                 logger.info(
                   `📷 Image saved successfully: ${fileName} (${buffer.length} bytes)`
                 );
@@ -490,14 +512,16 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
               { reuploadRequest: sock.updateMediaMessage }
             );
             if (buffer && buffer.length > 0) {
-              const uploadsDir = path.join(__dirname, "../uploads");
+              // const uploadsDir = path.join(__dirname, "../uploads");
+              const uploadsDir = path.join(__dirname, "/app/uploads");
               if (!fs.existsSync(uploadsDir)) {
                 fs.mkdirSync(uploadsDir, { recursive: true });
               }
               const fileName = `video_${Date.now()}.mp4`;
               const filePath = path.join(uploadsDir, fileName);
               fs.writeFileSync(filePath, buffer);
-              mediaUrl = `/uploads/${fileName}`;
+              // mediaUrl = `/uploads/${fileName}`;
+              mediaUrl = `/app/uploads/${fileName}`;
             }
           } catch (err) {
             logger.warn(`⚠️ Failed to download video: ${err.message}`);
@@ -517,14 +541,16 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
               { reuploadRequest: sock.updateMediaMessage }
             );
             if (buffer && buffer.length > 0) {
-              const uploadsDir = path.join(__dirname, "../uploads");
+              // const uploadsDir = path.join(__dirname, "../uploads");
+              const uploadsDir = path.join(__dirname, "/app/uploads");
               if (!fs.existsSync(uploadsDir)) {
                 fs.mkdirSync(uploadsDir, { recursive: true });
               }
               const fileName = `audio_${Date.now()}.ogg`;
               const filePath = path.join(uploadsDir, fileName);
               fs.writeFileSync(filePath, buffer);
-              mediaUrl = `/uploads/${fileName}`;
+              // mediaUrl = `/uploads/${fileName}`;
+              mediaUrl = `/app/uploads/${fileName}`;
             }
           } catch (err) {
             logger.warn(`⚠️ Failed to download audio: ${err.message}`);
@@ -546,7 +572,8 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
               { reuploadRequest: sock.updateMediaMessage }
             );
             if (buffer && buffer.length > 0) {
-              const uploadsDir = path.join(__dirname, "../uploads");
+              // const uploadsDir = path.join(__dirname, "../uploads");
+              const uploadsDir = path.join(__dirname, "/app/uploads");
               if (!fs.existsSync(uploadsDir)) {
                 fs.mkdirSync(uploadsDir, { recursive: true });
               }
@@ -554,7 +581,8 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
                 msg.message.documentMessage.fileName || `doc_${Date.now()}`;
               const filePath = path.join(uploadsDir, fileName);
               fs.writeFileSync(filePath, buffer);
-              mediaUrl = `/uploads/${fileName}`;
+              // mediaUrl = `/uploads/${fileName}`;
+              mediaUrl = `/app/uploads/${fileName}`;
             }
           } catch (err) {
             logger.warn(`⚠️ Failed to download document: ${err.message}`);

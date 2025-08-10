@@ -264,3 +264,70 @@ If issues persist:
 5. Check WhatsApp session connectivity
 
 For database issues, ensure PostgreSQL is properly installed and configured for your system.
+
+## Connection Closed Error Fix
+
+### Error: "Connection Closed" when sending images
+
+This error occurs when the WhatsApp WebSocket connection is not stable during image upload.
+
+#### Immediate Solutions:
+
+1. **Check Session Health**
+
+   ```bash
+   # Test connection health
+   node whatsapp/test-connection-health.js
+
+   # Test specific session
+   node whatsapp/test-connection-health.js your-session-id
+   ```
+
+2. **API Health Check**
+
+   ```bash
+   # Check via API
+   curl -H "Authorization: Bearer YOUR_TOKEN" \
+        http://localhost:3000/whatsapp/health/your-session-id
+   ```
+
+3. **Restart WhatsApp Session**
+   - Logout and reconnect the session
+   - Scan QR code again if needed
+   - Wait for connection to stabilize
+
+#### Enhanced Error Handling:
+
+The system now includes:
+
+- ✅ **Connection Health Check**: Validates session before sending
+- ✅ **Retry Mechanism**: 3 attempts with exponential backoff
+- ✅ **WebSocket Monitoring**: Real-time connection state tracking
+- ✅ **Detailed Logging**: Better error diagnostics
+
+#### Prevention:
+
+1. **Monitor Connection State**
+
+   - Check session health before sending images
+   - Use the health check endpoint regularly
+
+2. **Stable Network**
+
+   - Ensure stable internet connection
+   - Avoid sending during network instability
+
+3. **Session Management**
+   - Keep sessions active and authenticated
+   - Reconnect if connection drops
+
+#### Retry Behavior:
+
+When sending images fails:
+
+1. **Attempt 1**: Immediate send
+2. **Attempt 2**: Wait 2 seconds, retry
+3. **Attempt 3**: Wait 4 seconds, retry
+4. **Final**: If all fail, return detailed error
+
+The image is saved to server regardless of send status, so you can retry manually if needed.

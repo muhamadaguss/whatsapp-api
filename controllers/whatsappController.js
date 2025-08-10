@@ -5,6 +5,10 @@ const {
   getActiveSessionIds,
   cleanupSession,
 } = require("../auth/session");
+const {
+  checkSessionHealth,
+  logSessionHealth,
+} = require("../utils/connectionHealth");
 const path = require("path");
 const { processExcelAndSendMessages } = require("../services/excelService");
 const fs = require("fs");
@@ -54,20 +58,44 @@ const sendMessageWA = asyncHandler(async (req, res) => {
     );
   }
 
+  // Check session health (use permissive mode for better compatibility)
+  const health = checkSessionHealth(sock, sessionId, true);
+  if (!health.isHealthy) {
+    logSessionHealth(sock, sessionId);
+
+    // Provide more specific error messages
+    const criticalIssues = health.issues.filter(
+      (issue) =>
+        issue.includes("closed") ||
+        issue.includes("not authenticated") ||
+        issue.includes("not available")
+    );
+
+    if (criticalIssues.length > 0) {
+      throw new AppError(
+        `Session '${sessionId}' tidak dapat digunakan: ${criticalIssues.join(
+          ", "
+        )}. Silakan reconnect session.`,
+        503
+      );
+    } else {
+      // Non-critical issues, log warning but allow to proceed
+      logger.warn(
+        `⚠️ Session ${sessionId} has minor issues: ${health.issues.join(", ")}`
+      );
+    }
+  }
+
   let result;
   let messageContent = message;
   let mediaUrl = null;
 
   if (messageType === "image" && req.file) {
-    // Send image message
+    // Send image message with retry mechanism
     const imageBuffer = fs.readFileSync(req.file.path);
-    result = await sock.sendMessage(phone + "@s.whatsapp.net", {
-      image: imageBuffer,
-      caption: message || "", // Optional caption
-    });
     messageContent = `[Image] ${message || ""}`;
 
-    // Save image to permanent location
+    // Save image to permanent location first
     const fileName = `sent_${Date.now()}_${Math.random()
       .toString(36)
       .substring(7)}.jpg`;
@@ -80,6 +108,66 @@ const sendMessageWA = asyncHandler(async (req, res) => {
       logger.info(`📷 Image saved permanently: ${fileName}`);
     } catch (saveError) {
       logger.error(`❌ Failed to save image permanently: ${saveError.message}`);
+    }
+
+    // Try to send image with retry
+    let retryCount = 0;
+    const maxRetries = 3;
+
+    while (retryCount < maxRetries) {
+      try {
+        logger.info(
+          `📷 Attempting to send image (attempt ${
+            retryCount + 1
+          }/${maxRetries})`
+        );
+
+        // Double-check connection before sending
+        if (
+          sock.ws &&
+          sock.ws.readyState !== 1 &&
+          sock.ws.readyState !== undefined
+        ) {
+          throw new Error(`WebSocket not ready (state: ${sock.ws.readyState})`);
+        }
+
+        result = await sock.sendMessage(phone + "@s.whatsapp.net", {
+          image: imageBuffer,
+          caption: message || "", // Optional caption
+        });
+
+        logger.info(`✅ Image sent successfully on attempt ${retryCount + 1}`);
+        break; // Success, exit retry loop
+      } catch (sendError) {
+        retryCount++;
+        logger.error(`❌ Image send attempt ${retryCount} failed:`, {
+          error: sendError.message,
+          phone,
+          sessionId,
+          retryCount,
+        });
+
+        if (retryCount >= maxRetries) {
+          // All retries failed, throw the error
+          throw new AppError(
+            `Gagal mengirim gambar setelah ${maxRetries} percobaan. Error: ${sendError.message}`,
+            500
+          );
+        }
+
+        // Wait before retry (exponential backoff)
+        const waitTime = Math.pow(2, retryCount) * 1000; // 2s, 4s, 8s
+        logger.info(`⏳ Waiting ${waitTime}ms before retry...`);
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+
+        // Check connection again before retry
+        if (sock.ws && sock.ws.readyState !== 1) {
+          throw new AppError(
+            `Koneksi WhatsApp terputus selama pengiriman gambar. Silakan coba lagi.`,
+            503
+          );
+        }
+      }
     }
 
     // Clean up temporary uploaded file
@@ -271,6 +359,31 @@ const getContactDetails = asyncHandler(async (req, res) => {
   }
 });
 
+const getSessionHealth = asyncHandler(async (req, res) => {
+  const { sessionId } = req.params;
+
+  const sock = getSock(sessionId);
+  if (!sock) {
+    throw new AppError(
+      `Session '${sessionId}' tidak ditemukan atau tidak aktif.`,
+      404
+    );
+  }
+
+  const health = checkSessionHealth(sock, sessionId);
+
+  return res.status(200).json({
+    status: "success",
+    data: {
+      sessionId,
+      isHealthy: health.isHealthy,
+      issues: health.issues,
+      details: health.details,
+      timestamp: new Date().toISOString(),
+    },
+  });
+});
+
 module.exports = {
   getQRImage,
   sendMessageWA,
@@ -278,4 +391,5 @@ module.exports = {
   logoutSession,
   getActiveSessions,
   getContactDetails,
+  getSessionHealth,
 };
