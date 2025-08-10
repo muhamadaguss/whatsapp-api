@@ -207,8 +207,10 @@ app.post("/cleanup/manual", async (req, res) => {
   }
 });
 
-// Serve static files for uploaded images
-app.use("/uploads", express.static("uploads"));
+// Serve static files for uploaded images and received media
+const path = require("path");
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.use("/media", express.static(path.join(__dirname, "media")));
 
 app.use("/whatsapp", whatsappRoutes);
 app.use("/auth", authRoutes);

@@ -452,11 +452,11 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
               );
 
               if (buffer && buffer.length > 0) {
-                // const uploadsDir = path.join(__dirname, "../uploads");
-                const uploadsDir = path.join(__dirname, "/app/uploads");
-                if (!fs.existsSync(uploadsDir)) {
-                  fs.mkdirSync(uploadsDir, { recursive: true });
-                  logger.info(`📁 Created uploads directory: ${uploadsDir}`);
+                // Create media directory for received media
+                const mediaDir = path.join(__dirname, "../media");
+                if (!fs.existsSync(mediaDir)) {
+                  fs.mkdirSync(mediaDir, { recursive: true });
+                  logger.info(`📁 Created media directory: ${mediaDir}`);
                 }
 
                 let extension = "jpg";
@@ -470,11 +470,10 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
                 const fileName = `image_${Date.now()}_${Math.random()
                   .toString(36)
                   .substring(7)}.${extension}`;
-                const filePath = path.join(uploadsDir, fileName);
+                const filePath = path.join(mediaDir, fileName);
 
                 fs.writeFileSync(filePath, buffer);
-                // mediaUrl = `/uploads/${fileName}`;
-                mediaUrl = `app/uploads/${fileName}`;
+                mediaUrl = `/media/${fileName}`;
                 logger.info(
                   `📷 Image saved successfully: ${fileName} (${buffer.length} bytes)`
                 );
@@ -512,16 +511,14 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
               { reuploadRequest: sock.updateMediaMessage }
             );
             if (buffer && buffer.length > 0) {
-              // const uploadsDir = path.join(__dirname, "../uploads");
-              const uploadsDir = path.join(__dirname, "/app/uploads");
-              if (!fs.existsSync(uploadsDir)) {
-                fs.mkdirSync(uploadsDir, { recursive: true });
+              const mediaDir = path.join(__dirname, "../media");
+              if (!fs.existsSync(mediaDir)) {
+                fs.mkdirSync(mediaDir, { recursive: true });
               }
               const fileName = `video_${Date.now()}.mp4`;
-              const filePath = path.join(uploadsDir, fileName);
+              const filePath = path.join(mediaDir, fileName);
               fs.writeFileSync(filePath, buffer);
-              // mediaUrl = `/uploads/${fileName}`;
-              mediaUrl = `/app/uploads/${fileName}`;
+              mediaUrl = `/media/${fileName}`;
             }
           } catch (err) {
             logger.warn(`⚠️ Failed to download video: ${err.message}`);
@@ -541,16 +538,14 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
               { reuploadRequest: sock.updateMediaMessage }
             );
             if (buffer && buffer.length > 0) {
-              // const uploadsDir = path.join(__dirname, "../uploads");
-              const uploadsDir = path.join(__dirname, "/app/uploads");
-              if (!fs.existsSync(uploadsDir)) {
-                fs.mkdirSync(uploadsDir, { recursive: true });
+              const mediaDir = path.join(__dirname, "../media");
+              if (!fs.existsSync(mediaDir)) {
+                fs.mkdirSync(mediaDir, { recursive: true });
               }
               const fileName = `audio_${Date.now()}.ogg`;
-              const filePath = path.join(uploadsDir, fileName);
+              const filePath = path.join(mediaDir, fileName);
               fs.writeFileSync(filePath, buffer);
-              // mediaUrl = `/uploads/${fileName}`;
-              mediaUrl = `/app/uploads/${fileName}`;
+              mediaUrl = `/media/${fileName}`;
             }
           } catch (err) {
             logger.warn(`⚠️ Failed to download audio: ${err.message}`);
@@ -572,17 +567,15 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
               { reuploadRequest: sock.updateMediaMessage }
             );
             if (buffer && buffer.length > 0) {
-              // const uploadsDir = path.join(__dirname, "../uploads");
-              const uploadsDir = path.join(__dirname, "/app/uploads");
-              if (!fs.existsSync(uploadsDir)) {
-                fs.mkdirSync(uploadsDir, { recursive: true });
+              const mediaDir = path.join(__dirname, "../media");
+              if (!fs.existsSync(mediaDir)) {
+                fs.mkdirSync(mediaDir, { recursive: true });
               }
               const fileName =
                 msg.message.documentMessage.fileName || `doc_${Date.now()}`;
-              const filePath = path.join(uploadsDir, fileName);
+              const filePath = path.join(mediaDir, fileName);
               fs.writeFileSync(filePath, buffer);
-              // mediaUrl = `/uploads/${fileName}`;
-              mediaUrl = `/app/uploads/${fileName}`;
+              mediaUrl = `/media/${fileName}`;
             }
           } catch (err) {
             logger.warn(`⚠️ Failed to download document: ${err.message}`);
