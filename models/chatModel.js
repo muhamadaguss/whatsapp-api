@@ -25,6 +25,15 @@ const ChatMessage = sequelize.define(
       type: DataTypes.TEXT,
       allowNull: false,
     },
+    messageType: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "text",
+    },
+    mediaUrl: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+    },
     timestamp: {
       type: DataTypes.DATE,
       allowNull: false,

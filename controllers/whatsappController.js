@@ -33,13 +33,17 @@ const getQRImage = asyncHandler(async (req, res) => {
 });
 
 const sendMessageWA = asyncHandler(async (req, res) => {
-  const { phone, message, sessionId } = req.body;
+  const { phone, message, sessionId, messageType = "text" } = req.body;
   logger.info(
-    `📞 Mengirim pesan ke: ${phone}, dengan pesan: ${message}, pada session: ${sessionId}`
+    `📞 Mengirim pesan ke: ${phone}, dengan pesan: ${message}, pada session: ${sessionId}, type: ${messageType}`
   );
 
-  if (!phone || !message || !sessionId) {
-    throw new AppError("Nomor, pesan, dan sessionId wajib.", 400);
+  if (!phone || !sessionId) {
+    throw new AppError("Nomor dan sessionId wajib.", 400);
+  }
+
+  if (messageType === "text" && !message) {
+    throw new AppError("Pesan teks wajib diisi.", 400);
   }
 
   const sock = getSock(sessionId);
@@ -50,9 +54,48 @@ const sendMessageWA = asyncHandler(async (req, res) => {
     );
   }
 
-  const result = await sock.sendMessage(phone + "@s.whatsapp.net", {
-    text: message,
-  });
+  let result;
+  let messageContent = message;
+  let mediaUrl = null;
+
+  if (messageType === "image" && req.file) {
+    // Send image message
+    const imageBuffer = fs.readFileSync(req.file.path);
+    result = await sock.sendMessage(phone + "@s.whatsapp.net", {
+      image: imageBuffer,
+      caption: message || "", // Optional caption
+    });
+    messageContent = `[Image] ${message || ""}`;
+
+    // Save image to permanent location
+    const fileName = `sent_${Date.now()}_${Math.random()
+      .toString(36)
+      .substring(7)}.jpg`;
+    const permanentPath = path.join(__dirname, "../uploads", fileName);
+
+    try {
+      // Copy file to permanent location
+      fs.copyFileSync(req.file.path, permanentPath);
+      mediaUrl = `/uploads/${fileName}`;
+      logger.info(`📷 Image saved permanently: ${fileName}`);
+    } catch (saveError) {
+      logger.error(`❌ Failed to save image permanently: ${saveError.message}`);
+    }
+
+    // Clean up temporary uploaded file
+    try {
+      fs.unlinkSync(req.file.path);
+    } catch (cleanupError) {
+      logger.warn(
+        `⚠️ Gagal hapus file gambar temporary: ${cleanupError.message}`
+      );
+    }
+  } else {
+    // Send text message
+    result = await sock.sendMessage(phone + "@s.whatsapp.net", {
+      text: message,
+    });
+  }
 
   // Save message status to database
   try {
@@ -63,7 +106,7 @@ const sendMessageWA = asyncHandler(async (req, res) => {
       status: "sent",
       userId: req.user?.id,
       sessionId,
-      message,
+      message: messageContent,
       deliveredAt: new Date(),
       readAt: null,
     });
@@ -77,6 +120,25 @@ const sendMessageWA = asyncHandler(async (req, res) => {
       sessionId,
     });
     // Jangan throw error, response tetap success
+  }
+
+  // Also save to chat messages for consistency
+  try {
+    const ChatMessageModel = require("../models/chatModel");
+    await ChatMessageModel.create({
+      sessionId,
+      from: phone + "@s.whatsapp.net",
+      contactName: phone,
+      text: messageContent,
+      messageType: messageType || "text",
+      mediaUrl: mediaUrl,
+      timestamp: new Date(),
+      fromMe: true,
+      isRead: true,
+    });
+    logger.info(`💾 Chat message saved for sent message to ${phone}`);
+  } catch (chatDbError) {
+    logger.error(`❌ Failed to save chat message:`, chatDbError.message);
   }
 
   return res.status(200).json({ status: "success", result });

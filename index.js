@@ -207,6 +207,9 @@ app.post("/cleanup/manual", async (req, res) => {
   }
 });
 
+// Serve static files for uploaded images
+app.use("/uploads", express.static("uploads"));
+
 app.use("/whatsapp", whatsappRoutes);
 app.use("/auth", authRoutes);
 app.use("/download", downloadRoutes);

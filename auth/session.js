@@ -4,8 +4,9 @@ const QRCode = require("qrcode");
 const {
   default: makeWASocket,
   useMultiFileAuthState,
-  fetchLatestBaileysVersion,
   DisconnectReason,
+  downloadMediaMessage,
+  getContentType,
 } = require("@whiskeysockets/baileys");
 const SessionModel = require("../models/sessionModel");
 const MessageStatusModel = require("../models/messageStatusModel");
@@ -46,8 +47,8 @@ function getStatusCodeDescription(statusCode) {
 
 // Helper function to ensure sessions directory exists with proper permissions
 function ensureSessionsDirectory() {
-  // const sessionsDir = path.resolve("./sessions");
-  const sessionsDir = path.resolve("/app/sessions");
+  const sessionsDir = path.resolve("./sessions");
+  // const sessionsDir = path.resolve("/app/sessions");
   try {
     if (!fs.existsSync(sessionsDir)) {
       fs.mkdirSync(sessionsDir, { recursive: true, mode: 0o755 });
@@ -74,11 +75,11 @@ async function startWhatsApp(sessionId, userId = null) {
   // Ensure sessions directory exists
   ensureSessionsDirectory();
 
-  // const sessionFolder = path.resolve(`./sessions/${sessionId}`);
-  const sessionFolder = path.resolve(`/app/sessions/${sessionId}`);
+  const sessionFolder = path.resolve(`./sessions/${sessionId}`);
+  // const sessionFolder = path.resolve(`/app/sessions/${sessionId}`);
   // Check if we can write to sessions directory
-  // const sessionsDir = path.resolve("./sessions");
-  const sessionsDir = path.resolve("/app/sessions");
+  const sessionsDir = path.resolve("./sessions");
+  // const sessionsDir = path.resolve("/app/sessions");
   if (!canWriteToDirectory(sessionsDir)) {
     logger.warn(`⚠️ Cannot write to sessions directory: ${sessionsDir}`);
   }
@@ -398,54 +399,209 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
 
         const from = msg.key.remoteJid;
         const isFromMe = msg.key.fromMe;
-        const text =
-          msg.message?.conversation ||
-          msg.message?.extendedTextMessage?.text ||
-          msg.message?.imageMessage?.caption ||
-          msg.message?.videoMessage?.caption ||
-          "[Non-text message]";
+        let text = "[Non-text message]";
+        let messageType = "text";
+        let mediaUrl = null;
 
-        // Get contact name with caching
+        const messageTypeDetected = getContentType(msg.message);
+
+        // === TEXT MESSAGE ===
+        if (msg.message?.conversation) {
+          text = msg.message.conversation;
+          messageType = "text";
+        } else if (msg.message?.extendedTextMessage?.text) {
+          text = msg.message.extendedTextMessage.text;
+          messageType = "text";
+        }
+
+        // === IMAGE MESSAGE ===
+        else if (msg.message?.imageMessage) {
+          text = msg.message.imageMessage.caption || "[Image]";
+          messageType = "image";
+
+          const ENABLE_IMAGE_DOWNLOAD = true;
+          if (ENABLE_IMAGE_DOWNLOAD) {
+            try {
+              logger.info(`📷 Attempting to download image from ${from}`);
+
+              const buffer = await downloadMediaMessage(
+                msg,
+                "buffer",
+                {},
+                { reuploadRequest: sock.updateMediaMessage }
+              );
+
+              if (buffer && buffer.length > 0) {
+                const uploadsDir = path.join(__dirname, "../uploads");
+                if (!fs.existsSync(uploadsDir)) {
+                  fs.mkdirSync(uploadsDir, { recursive: true });
+                  logger.info(`📁 Created uploads directory: ${uploadsDir}`);
+                }
+
+                let extension = "jpg";
+                if (msg.message.imageMessage.mimetype) {
+                  const mimeType = msg.message.imageMessage.mimetype;
+                  if (mimeType.includes("png")) extension = "png";
+                  else if (mimeType.includes("gif")) extension = "gif";
+                  else if (mimeType.includes("webp")) extension = "webp";
+                }
+
+                const fileName = `image_${Date.now()}_${Math.random()
+                  .toString(36)
+                  .substring(7)}.${extension}`;
+                const filePath = path.join(uploadsDir, fileName);
+
+                fs.writeFileSync(filePath, buffer);
+                mediaUrl = `/uploads/${fileName}`;
+                logger.info(
+                  `📷 Image saved successfully: ${fileName} (${buffer.length} bytes)`
+                );
+              } else {
+                logger.warn(`⚠️ Downloaded image buffer is empty or null`);
+              }
+            } catch (downloadError) {
+              logger.error(`❌ Failed to download image:`, {
+                error: downloadError.message,
+                stack: downloadError.stack,
+                from,
+                messageId: msg.key.id,
+                baileys_version:
+                  require("../package.json").dependencies[
+                    "@whiskeysockets/baileys"
+                  ],
+              });
+              logger.info(
+                `📷 Continuing without image download for message from ${from}`
+              );
+            }
+          }
+        }
+
+        // === VIDEO MESSAGE ===
+        else if (msg.message?.videoMessage) {
+          text = msg.message.videoMessage.caption || "[Video]";
+          messageType = "video";
+
+          try {
+            const buffer = await downloadMediaMessage(
+              msg,
+              "buffer",
+              {},
+              { reuploadRequest: sock.updateMediaMessage }
+            );
+            if (buffer && buffer.length > 0) {
+              const uploadsDir = path.join(__dirname, "../uploads");
+              if (!fs.existsSync(uploadsDir)) {
+                fs.mkdirSync(uploadsDir, { recursive: true });
+              }
+              const fileName = `video_${Date.now()}.mp4`;
+              const filePath = path.join(uploadsDir, fileName);
+              fs.writeFileSync(filePath, buffer);
+              mediaUrl = `/uploads/${fileName}`;
+            }
+          } catch (err) {
+            logger.warn(`⚠️ Failed to download video: ${err.message}`);
+          }
+        }
+
+        // === AUDIO MESSAGE ===
+        else if (msg.message?.audioMessage) {
+          text = "[Audio]";
+          messageType = "audio";
+
+          try {
+            const buffer = await downloadMediaMessage(
+              msg,
+              "buffer",
+              {},
+              { reuploadRequest: sock.updateMediaMessage }
+            );
+            if (buffer && buffer.length > 0) {
+              const uploadsDir = path.join(__dirname, "../uploads");
+              if (!fs.existsSync(uploadsDir)) {
+                fs.mkdirSync(uploadsDir, { recursive: true });
+              }
+              const fileName = `audio_${Date.now()}.ogg`;
+              const filePath = path.join(uploadsDir, fileName);
+              fs.writeFileSync(filePath, buffer);
+              mediaUrl = `/uploads/${fileName}`;
+            }
+          } catch (err) {
+            logger.warn(`⚠️ Failed to download audio: ${err.message}`);
+          }
+        }
+
+        // === DOCUMENT MESSAGE ===
+        else if (msg.message?.documentMessage) {
+          text = `[Document: ${
+            msg.message.documentMessage.fileName || "Unknown"
+          }]`;
+          messageType = "document";
+
+          try {
+            const buffer = await downloadMediaMessage(
+              msg,
+              "buffer",
+              {},
+              { reuploadRequest: sock.updateMediaMessage }
+            );
+            if (buffer && buffer.length > 0) {
+              const uploadsDir = path.join(__dirname, "../uploads");
+              if (!fs.existsSync(uploadsDir)) {
+                fs.mkdirSync(uploadsDir, { recursive: true });
+              }
+              const fileName =
+                msg.message.documentMessage.fileName || `doc_${Date.now()}`;
+              const filePath = path.join(uploadsDir, fileName);
+              fs.writeFileSync(filePath, buffer);
+              mediaUrl = `/uploads/${fileName}`;
+            }
+          } catch (err) {
+            logger.warn(`⚠️ Failed to download document: ${err.message}`);
+          }
+        }
+
+        // === GET CONTACT NAME ===
         const contactName = isFromMe
           ? "Me"
           : await getContactNameWithCache(sock, from);
 
         logger.info(`📩 Chat from ${contactName} (${from}): ${text}`);
 
-        const remoteJid = msg.key.remoteJid;
-
-        // Filter hanya untuk kontak pribadi (bukan grup dan bukan newsletter)
-        const isPrivateChat = remoteJid.endsWith("@s.whatsapp.net");
+        // === SAVE ONLY PRIVATE CHAT (NOT GROUP / NOT NEWSLETTER) ===
+        const isPrivateChat = from.endsWith("@s.whatsapp.net");
 
         if (isPrivateChat && text !== "[Non-text message]") {
           try {
-            // Validasi data sebelum insert
             const messageData = {
               sessionId: sessionId || "unknown",
-              from: from || "unknown", // Keep JID for database consistency
-              contactName: contactName, // Add contact name field
+              from: from || "unknown",
+              contactName: contactName,
               text: text || "",
+              messageType: messageType || "text",
+              mediaUrl: mediaUrl,
               timestamp: msg.messageTimestamp
                 ? new Date(Number(msg.messageTimestamp) * 1000)
                 : new Date(),
               fromMe: Boolean(isFromMe),
-              isRead: Boolean(isFromMe), // Messages from me are automatically read
+              isRead: Boolean(isFromMe),
             };
 
-            // Simpan ke database jika perlu
             await ChatMessageModel.create(messageData);
 
-            // Kirim notifikasi ke frontend via Socket.io
             const io = getSocket();
             io.emit("new_message", {
               sessionId,
               from,
-              contactName, // Send contact name to frontend
+              contactName,
               text,
+              messageType,
+              mediaUrl,
               timestamp: new Date(Number(msg.messageTimestamp) * 1000),
               fromMe: isFromMe,
               isRead: Boolean(isFromMe),
             });
+
             logger.info(
               `💾 Chat message saved to database from ${contactName} (${from})`
             );
@@ -469,7 +625,6 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
           messageKey: msg.key,
           stack: msgError.stack,
         });
-        // Continue processing other messages
       }
     }
   } catch (error) {
@@ -478,7 +633,6 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
       sessionId,
       stack: error.stack,
     });
-    // Don't throw error to prevent session crash
   }
 }
 

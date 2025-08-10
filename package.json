@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"No tests yet\"",
-    "start": "node index.js"
+    "start": "node index.js",
+    "migrate:image": "node run-image-migration.js"
   },
   "keywords": [],
   "author": "",

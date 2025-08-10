@@ -27,6 +27,8 @@ const getAllChats = asyncHandler(async (req, res) => {
     groupedChats[chatKey].messages.push({
       id: `${chat.sessionId}-${groupedChats[chatKey].messages.length}`, // index sesuai urutan push
       text: chat.text,
+      messageType: chat.messageType || "text",
+      mediaUrl: chat.mediaUrl,
       timestamp: chat.timestamp,
       fromMe: chat.fromMe,
       isRead: chat.isRead,

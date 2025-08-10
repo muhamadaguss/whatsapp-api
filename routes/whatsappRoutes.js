@@ -21,10 +21,34 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({ storage });
+// Configure multer for different file types
+const upload = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    // Allow images for chat messages
+    if (file.fieldname === "image") {
+      if (file.mimetype.startsWith("image/")) {
+        cb(null, true);
+      } else {
+        cb(new Error("Only image files are allowed for chat messages"), false);
+      }
+    } else {
+      // Allow excel files for blast messages
+      cb(null, true);
+    }
+  },
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit
+  },
+});
 
 router.get("/qr-image/:sessionId", verifyToken, getQRImage);
-router.post("/send-message", verifyToken, sendMessageWA);
+router.post(
+  "/send-message",
+  verifyToken,
+  upload.single("image"),
+  sendMessageWA
+);
 router.post(
   "/upload/:sessionId",
   verifyToken,
