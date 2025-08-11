@@ -42,6 +42,14 @@ const sendMessageWA = asyncHandler(async (req, res) => {
     `📞 Mengirim pesan ke: ${phone}, dengan pesan: ${message}, pada session: ${sessionId}, type: ${messageType}`
   );
 
+  // Debug request details
+  logger.info(`🔍 Request debug:`, {
+    body: req.body,
+    files: req.files,
+    file: req.file,
+    headers: req.headers["content-type"],
+  });
+
   if (!phone || !sessionId) {
     throw new AppError("Nomor dan sessionId wajib.", 400);
   }
@@ -90,34 +98,56 @@ const sendMessageWA = asyncHandler(async (req, res) => {
   let messageContent = message;
   let mediaUrl = null;
 
-  if (messageType === "image" && req.file) {
-    // Send image message with retry mechanism
-    const imageBuffer = fs.readFileSync(req.file.path);
-    messageContent = `[Image] ${message || ""}`;
+  // Handle file uploads (image or video)
+  const uploadedFile =
+    req.files?.image?.[0] || req.files?.video?.[0] || req.file;
 
-    // Save image to permanent location first
+  // Debug logging
+  logger.info(`📁 File upload debug:`, {
+    messageType,
+    hasReqFiles: !!req.files,
+    hasReqFile: !!req.file,
+    imageFiles: req.files?.image?.length || 0,
+    videoFiles: req.files?.video?.length || 0,
+    uploadedFile: !!uploadedFile,
+  });
+
+  if ((messageType === "image" || messageType === "video") && uploadedFile) {
+    // Send media message with retry mechanism
+    const mediaBuffer = fs.readFileSync(uploadedFile.path);
+    const isVideo = messageType === "video";
+    messageContent = `[${isVideo ? "Video" : "Image"}] ${message || ""}`;
+
+    // Save media to permanent location first
+    const extension = isVideo ? "mp4" : "jpg";
     const fileName = `sent_${Date.now()}_${Math.random()
       .toString(36)
-      .substring(7)}.jpg`;
+      .substring(7)}.${extension}`;
     const permanentPath = path.join(__dirname, "../uploads", fileName);
 
     try {
       // Copy file to permanent location
-      fs.copyFileSync(req.file.path, permanentPath);
+      fs.copyFileSync(uploadedFile.path, permanentPath);
       mediaUrl = `/uploads/${fileName}`;
-      logger.info(`📷 Image saved permanently: ${fileName}`);
+      logger.info(
+        `📷 ${isVideo ? "Video" : "Image"} saved permanently: ${fileName}`
+      );
     } catch (saveError) {
-      logger.error(`❌ Failed to save image permanently: ${saveError.message}`);
+      logger.error(
+        `❌ Failed to save ${isVideo ? "video" : "image"} permanently: ${
+          saveError.message
+        }`
+      );
     }
 
-    // Try to send image with retry
+    // Try to send media with retry
     let retryCount = 0;
     const maxRetries = 3;
 
     while (retryCount < maxRetries) {
       try {
         logger.info(
-          `📷 Attempting to send image (attempt ${
+          `📷 Attempting to send ${isVideo ? "video" : "image"} (attempt ${
             retryCount + 1
           }/${maxRetries})`
         );
@@ -131,26 +161,44 @@ const sendMessageWA = asyncHandler(async (req, res) => {
           throw new Error(`WebSocket not ready (state: ${sock.ws.readyState})`);
         }
 
-        result = await sock.sendMessage(phone + "@s.whatsapp.net", {
-          image: imageBuffer,
-          caption: message || "", // Optional caption
-        });
+        if (isVideo) {
+          result = await sock.sendMessage(phone + "@s.whatsapp.net", {
+            video: mediaBuffer,
+            caption: message || "", // Optional caption
+          });
+        } else {
+          result = await sock.sendMessage(phone + "@s.whatsapp.net", {
+            image: mediaBuffer,
+            caption: message || "", // Optional caption
+          });
+        }
 
-        logger.info(`✅ Image sent successfully on attempt ${retryCount + 1}`);
+        logger.info(
+          `✅ ${isVideo ? "Video" : "Image"} sent successfully on attempt ${
+            retryCount + 1
+          }`
+        );
         break; // Success, exit retry loop
       } catch (sendError) {
         retryCount++;
-        logger.error(`❌ Image send attempt ${retryCount} failed:`, {
-          error: sendError.message,
-          phone,
-          sessionId,
-          retryCount,
-        });
+        logger.error(
+          `❌ ${
+            isVideo ? "Video" : "Image"
+          } send attempt ${retryCount} failed:`,
+          {
+            error: sendError.message,
+            phone,
+            sessionId,
+            retryCount,
+          }
+        );
 
         if (retryCount >= maxRetries) {
           // All retries failed, throw the error
           throw new AppError(
-            `Gagal mengirim gambar setelah ${maxRetries} percobaan. Error: ${sendError.message}`,
+            `Gagal mengirim ${
+              isVideo ? "video" : "gambar"
+            } setelah ${maxRetries} percobaan. Error: ${sendError.message}`,
             500
           );
         }
@@ -163,7 +211,9 @@ const sendMessageWA = asyncHandler(async (req, res) => {
         // Check connection again before retry
         if (sock.ws && sock.ws.readyState !== 1) {
           throw new AppError(
-            `Koneksi WhatsApp terputus selama pengiriman gambar. Silakan coba lagi.`,
+            `Koneksi WhatsApp terputus selama pengiriman ${
+              isVideo ? "video" : "gambar"
+            }. Silakan coba lagi.`,
             503
           );
         }
@@ -172,10 +222,12 @@ const sendMessageWA = asyncHandler(async (req, res) => {
 
     // Clean up temporary uploaded file
     try {
-      fs.unlinkSync(req.file.path);
+      fs.unlinkSync(uploadedFile.path);
     } catch (cleanupError) {
       logger.warn(
-        `⚠️ Gagal hapus file gambar temporary: ${cleanupError.message}`
+        `⚠️ Gagal hapus file ${isVideo ? "video" : "gambar"} temporary: ${
+          cleanupError.message
+        }`
       );
     }
   } else {

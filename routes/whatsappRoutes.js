@@ -31,7 +31,14 @@ const upload = multer({
       if (file.mimetype.startsWith("image/")) {
         cb(null, true);
       } else {
-        cb(new Error("Only image files are allowed for chat messages"), false);
+        cb(new Error("Only image files are allowed for image messages"), false);
+      }
+    } else if (file.fieldname === "video") {
+      // Allow videos for chat messages
+      if (file.mimetype.startsWith("video/")) {
+        cb(null, true);
+      } else {
+        cb(new Error("Only video files are allowed for video messages"), false);
       }
     } else {
       // Allow excel files for blast messages
@@ -39,7 +46,7 @@ const upload = multer({
     }
   },
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit
+    fileSize: 50 * 1024 * 1024, // 50MB limit for videos
   },
 });
 
@@ -47,7 +54,7 @@ router.get("/qr-image/:sessionId", verifyToken, getQRImage);
 router.post(
   "/send-message",
   verifyToken,
-  upload.single("image"),
+  upload.fields([{ name: "image" }, { name: "video" }]),
   sendMessageWA
 );
 router.post(

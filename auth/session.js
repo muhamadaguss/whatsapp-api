@@ -439,10 +439,15 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
           text = msg.message.imageMessage.caption || "[Image]";
           messageType = "image";
 
+          // Only download and save images from personal chats (not groups/newsletters)
+          const isPrivateChat = from.endsWith("@s.whatsapp.net");
           const ENABLE_IMAGE_DOWNLOAD = true;
-          if (ENABLE_IMAGE_DOWNLOAD) {
+
+          if (ENABLE_IMAGE_DOWNLOAD && isPrivateChat) {
             try {
-              logger.info(`📷 Attempting to download image from ${from}`);
+              logger.info(
+                `📷 Attempting to download image from personal chat: ${from}`
+              );
 
               const buffer = await downloadMediaMessage(
                 msg,
@@ -495,6 +500,10 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
                 `📷 Continuing without image download for message from ${from}`
               );
             }
+          } else if (!isPrivateChat) {
+            logger.info(
+              `📷 Skipping image download from group/newsletter: ${from}`
+            );
           }
         }
 
@@ -503,25 +512,51 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
           text = msg.message.videoMessage.caption || "[Video]";
           messageType = "video";
 
-          try {
-            const buffer = await downloadMediaMessage(
-              msg,
-              "buffer",
-              {},
-              { reuploadRequest: sock.updateMediaMessage }
-            );
-            if (buffer && buffer.length > 0) {
-              const mediaDir = path.join(__dirname, "../media");
-              if (!fs.existsSync(mediaDir)) {
-                fs.mkdirSync(mediaDir, { recursive: true });
+          // Only download and save videos from personal chats (not groups/newsletters)
+          const isPrivateChat = from.endsWith("@s.whatsapp.net");
+
+          if (isPrivateChat) {
+            try {
+              logger.info(
+                `🎥 Attempting to download video from personal chat: ${from}`
+              );
+
+              const buffer = await downloadMediaMessage(
+                msg,
+                "buffer",
+                {},
+                { reuploadRequest: sock.updateMediaMessage }
+              );
+              if (buffer && buffer.length > 0) {
+                const mediaDir = path.join(__dirname, "../media");
+                if (!fs.existsSync(mediaDir)) {
+                  fs.mkdirSync(mediaDir, { recursive: true });
+                  logger.info(`📁 Created media directory: ${mediaDir}`);
+                }
+                const fileName = `video_${Date.now()}.mp4`;
+                const filePath = path.join(mediaDir, fileName);
+                fs.writeFileSync(filePath, buffer);
+                mediaUrl = `/media/${fileName}`;
+                logger.info(
+                  `🎥 Video saved successfully: ${fileName} (${buffer.length} bytes)`
+                );
+              } else {
+                logger.warn(`⚠️ Downloaded video buffer is empty or null`);
               }
-              const fileName = `video_${Date.now()}.mp4`;
-              const filePath = path.join(mediaDir, fileName);
-              fs.writeFileSync(filePath, buffer);
-              mediaUrl = `/media/${fileName}`;
+            } catch (err) {
+              logger.error(`❌ Failed to download video:`, {
+                error: err.message,
+                from,
+                messageId: msg.key.id,
+              });
+              logger.warn(
+                `🎥 Continuing without video download for message from ${from}`
+              );
             }
-          } catch (err) {
-            logger.warn(`⚠️ Failed to download video: ${err.message}`);
+          } else {
+            logger.info(
+              `🎥 Skipping video download from group/newsletter: ${from}`
+            );
           }
         }
 
@@ -530,25 +565,51 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
           text = "[Audio]";
           messageType = "audio";
 
-          try {
-            const buffer = await downloadMediaMessage(
-              msg,
-              "buffer",
-              {},
-              { reuploadRequest: sock.updateMediaMessage }
-            );
-            if (buffer && buffer.length > 0) {
-              const mediaDir = path.join(__dirname, "../media");
-              if (!fs.existsSync(mediaDir)) {
-                fs.mkdirSync(mediaDir, { recursive: true });
+          // Only download and save audio from personal chats (not groups/newsletters)
+          const isPrivateChat = from.endsWith("@s.whatsapp.net");
+
+          if (isPrivateChat) {
+            try {
+              logger.info(
+                `🎵 Attempting to download audio from personal chat: ${from}`
+              );
+
+              const buffer = await downloadMediaMessage(
+                msg,
+                "buffer",
+                {},
+                { reuploadRequest: sock.updateMediaMessage }
+              );
+              if (buffer && buffer.length > 0) {
+                const mediaDir = path.join(__dirname, "../media");
+                if (!fs.existsSync(mediaDir)) {
+                  fs.mkdirSync(mediaDir, { recursive: true });
+                  logger.info(`📁 Created media directory: ${mediaDir}`);
+                }
+                const fileName = `audio_${Date.now()}.ogg`;
+                const filePath = path.join(mediaDir, fileName);
+                fs.writeFileSync(filePath, buffer);
+                mediaUrl = `/media/${fileName}`;
+                logger.info(
+                  `🎵 Audio saved successfully: ${fileName} (${buffer.length} bytes)`
+                );
+              } else {
+                logger.warn(`⚠️ Downloaded audio buffer is empty or null`);
               }
-              const fileName = `audio_${Date.now()}.ogg`;
-              const filePath = path.join(mediaDir, fileName);
-              fs.writeFileSync(filePath, buffer);
-              mediaUrl = `/media/${fileName}`;
+            } catch (err) {
+              logger.error(`❌ Failed to download audio:`, {
+                error: err.message,
+                from,
+                messageId: msg.key.id,
+              });
+              logger.warn(
+                `🎵 Continuing without audio download for message from ${from}`
+              );
             }
-          } catch (err) {
-            logger.warn(`⚠️ Failed to download audio: ${err.message}`);
+          } else {
+            logger.info(
+              `🎵 Skipping audio download from group/newsletter: ${from}`
+            );
           }
         }
 
@@ -559,26 +620,52 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
           }]`;
           messageType = "document";
 
-          try {
-            const buffer = await downloadMediaMessage(
-              msg,
-              "buffer",
-              {},
-              { reuploadRequest: sock.updateMediaMessage }
-            );
-            if (buffer && buffer.length > 0) {
-              const mediaDir = path.join(__dirname, "../media");
-              if (!fs.existsSync(mediaDir)) {
-                fs.mkdirSync(mediaDir, { recursive: true });
+          // Only download and save documents from personal chats (not groups/newsletters)
+          const isPrivateChat = from.endsWith("@s.whatsapp.net");
+
+          if (isPrivateChat) {
+            try {
+              logger.info(
+                `📄 Attempting to download document from personal chat: ${from}`
+              );
+
+              const buffer = await downloadMediaMessage(
+                msg,
+                "buffer",
+                {},
+                { reuploadRequest: sock.updateMediaMessage }
+              );
+              if (buffer && buffer.length > 0) {
+                const mediaDir = path.join(__dirname, "../media");
+                if (!fs.existsSync(mediaDir)) {
+                  fs.mkdirSync(mediaDir, { recursive: true });
+                  logger.info(`📁 Created media directory: ${mediaDir}`);
+                }
+                const fileName =
+                  msg.message.documentMessage.fileName || `doc_${Date.now()}`;
+                const filePath = path.join(mediaDir, fileName);
+                fs.writeFileSync(filePath, buffer);
+                mediaUrl = `/media/${fileName}`;
+                logger.info(
+                  `📄 Document saved successfully: ${fileName} (${buffer.length} bytes)`
+                );
+              } else {
+                logger.warn(`⚠️ Downloaded document buffer is empty or null`);
               }
-              const fileName =
-                msg.message.documentMessage.fileName || `doc_${Date.now()}`;
-              const filePath = path.join(mediaDir, fileName);
-              fs.writeFileSync(filePath, buffer);
-              mediaUrl = `/media/${fileName}`;
+            } catch (err) {
+              logger.error(`❌ Failed to download document:`, {
+                error: err.message,
+                from,
+                messageId: msg.key.id,
+              });
+              logger.warn(
+                `📄 Continuing without document download for message from ${from}`
+              );
             }
-          } catch (err) {
-            logger.warn(`⚠️ Failed to download document: ${err.message}`);
+          } else {
+            logger.info(
+              `📄 Skipping document download from group/newsletter: ${from}`
+            );
           }
         }
 
