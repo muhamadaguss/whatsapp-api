@@ -94,18 +94,18 @@ async function processExcelAndSendMessages(
       );
     }
 
-    async function emitFailure(reason, total) {
+    async function emitFailure(reason, failedCount) {
       logger.error(`❌ ${reason}`);
       await Blast.upsert({
         messageTemplate,
-        totalRecipients: total,
-        sentCount: 0,
-        failedCount: total,
+        totalRecipients: rows.length,
+        sentCount: resultsSocket.success,
+        failedCount: failedCount,
         status: "error",
         userId,
         campaignId,
       });
-      resultsSocket.failed = total;
+      resultsSocket.failed = failedCount;
       resultsSocket.status = "error";
       emitSocket();
     }
@@ -213,10 +213,39 @@ async function processExcelAndSendMessages(
         resultsSocket.failed++;
 
         if (isSessionError) {
-          await emitFailure(
-            `Session WhatsApp terputus saat proses`,
-            rows.length
-          );
+          // Hitung sisa nomor yang belum diproses
+          const remainingCount = rows.length - (i + 1);
+          logger.error(`❌ Session WhatsApp terputus saat proses`);
+
+          // Tambahkan sisa nomor yang belum diproses ke failed count
+          resultsSocket.failed += remainingCount;
+          resultsSocket.status = "error";
+
+          // Tambahkan detail nomor yang belum diproses ke results
+          for (let j = i + 1; j < rows.length; j++) {
+            const remainingRow = rows[j];
+            const remainingPhone = String(remainingRow["no"]).replace(
+              /\D/g,
+              ""
+            );
+            results.push({
+              phone: remainingPhone,
+              status: "error",
+              reason: "Session terputus sebelum pesan dikirim",
+            });
+          }
+
+          await Blast.upsert({
+            messageTemplate,
+            totalRecipients: rows.length,
+            sentCount: resultsSocket.success,
+            failedCount: resultsSocket.failed,
+            status: "error",
+            userId,
+            campaignId,
+          });
+
+          emitSocket();
           break;
         }
       }
@@ -266,9 +295,27 @@ async function processExcelAndSendMessages(
       logger.info(
         `📦 Campaign selesai. Total: ${rows.length} | Sukses: ${resultsSocket.success} | Gagal: ${resultsSocket.failed}`
       );
+
+      // Log detail nomor yang gagal untuk debugging
+      const failedNumbers = results.filter((r) => r.status === "error");
+      if (failedNumbers.length > 0) {
+        logger.info(`📋 Detail nomor yang gagal:`);
+        failedNumbers.forEach((failed, index) => {
+          logger.info(`   ${index + 1}. ${failed.phone} - ${failed.reason}`);
+        });
+      }
     }
 
-    const report = `📦 Campaign selesai. Total: ${rows.length} | Sukses: ${resultsSocket.success} | Gagal: ${resultsSocket.failed}`;
+    const failedNumbers = results.filter((r) => r.status === "error");
+    const sessionDisconnectedCount = failedNumbers.filter(
+      (r) => r.reason === "Session terputus sebelum pesan dikirim"
+    ).length;
+
+    let report = `📦 Campaign selesai. Total: ${rows.length} | Sukses: ${resultsSocket.success} | Gagal: ${resultsSocket.failed}`;
+
+    if (sessionDisconnectedCount > 0) {
+      report += `\n⚠️ ${sessionDisconnectedCount} nomor tidak diproses karena session terputus`;
+    }
 
     if (notifyNumber && sock) {
       try {
