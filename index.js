@@ -223,6 +223,7 @@ app.use("/chats", chatsRoutes);
 app.use("/contacts", contactRoutes);
 app.use("/cleanup", cleanupRoutes);
 app.use("/classifier", require("./routes/classifierRoutes"));
+app.use("/spin-text", require("./routes/spinTextRoutes"));
 
 // Error handling middleware (harus di akhir setelah semua routes)
 app.use(notFound); // 404 handler

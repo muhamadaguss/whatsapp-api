@@ -6,14 +6,19 @@ const logger = require("../utils/logger"); // Mengimpor logger
 const MessageStatusModel = require("../models/messageStatusModel");
 const { getSocket } = require("../auth/socket");
 const Boom = require("@hapi/boom");
+const SpinTextEngine = require("../utils/spinTextEngine");
 
 function randomDelay(min = 60, max = 120) {
   return Math.floor(Math.random() * (max - min + 1) + min) * 1000;
 }
 
 function replaceVariablesInMessage(template, data) {
+  // First, apply spin text processing
+  const spunTemplate = SpinTextEngine.parseSpinText(template);
+
+  // Then replace variables like {name}, {company}, etc.
   const regex = /\{(\w+)\}/g;
-  return template.replace(regex, (_, variableName) => {
+  return spunTemplate.replace(regex, (_, variableName) => {
     return data?.[variableName] ?? "";
   });
 }
@@ -75,9 +80,20 @@ async function processExcelAndSendMessages(
       return [];
     }
 
+    // Check if template has spin text and log info
+    const hasSpinText = SpinTextEngine.hasSpinText(messageTemplate);
+    const estimatedVariations =
+      SpinTextEngine.estimateVariations(messageTemplate);
+
     logger.info(
       `🚀 Mulai proses blast dengan sessionId: ${sessionId}, total kontak: ${rows.length}`
     );
+
+    if (hasSpinText) {
+      logger.info(
+        `🎲 Spin text detected! Estimated variations: ${estimatedVariations}`
+      );
+    }
 
     function emitSocket() {
       resultsSocket.progress = Math.min(
