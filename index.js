@@ -26,6 +26,7 @@ const templateRoutes = require("./routes/templateRoutes");
 const chatsRoutes = require("./routes/chatRoutes");
 const contactRoutes = require("./routes/contactRoutes");
 const cleanupRoutes = require("./routes/cleanupRoutes");
+const blastControlRoutes = require("./routes/blastControlRoutes");
 const sequelize = require("./models/db");
 const { loadExistingSessions } = require("./auth/session");
 const logger = require("./utils/logger"); // Mengimpor logger
@@ -224,6 +225,7 @@ app.use("/contacts", contactRoutes);
 app.use("/cleanup", cleanupRoutes);
 app.use("/classifier", require("./routes/classifierRoutes"));
 app.use("/spin-text", require("./routes/spinTextRoutes"));
+app.use("/blast-control", blastControlRoutes);
 
 // Error handling middleware (harus di akhir setelah semua routes)
 app.use(notFound); // 404 handler
@@ -251,6 +253,29 @@ async function initializeDatabase() {
 
     // Test database connection with retry logic
     await testDatabaseConnection(sequelize);
+
+    // Import all models to ensure they are registered with Sequelize
+    logger.info("📋 Loading models...");
+
+    // Load existing models
+    require("./models/userModel");
+    require("./models/sessionModel");
+    require("./models/blastModel");
+    require("./models/chatModel");
+    require("./models/templateModel");
+    require("./models/menuModel");
+    require("./models/messageStatusModel");
+    require("./models/blacklistedTokenModel");
+
+    // Load new blast session models
+    require("./models/blastSessionModel");
+    require("./models/blastMessageModel");
+
+    // Skip associations setup for now to avoid conflicts
+    // Associations can be added later when needed
+    logger.info("⚠️ Skipping associations setup to avoid conflicts");
+
+    logger.info("✅ All models loaded successfully");
 
     // Sync database models
     await sequelize.sync({ alter: true });
