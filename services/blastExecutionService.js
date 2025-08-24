@@ -43,9 +43,15 @@ class BlastExecutionService {
         throw new Error(`Session ${sessionId} not found`);
       }
 
-      // Check if already running
+      // Check if already running in-memory. If so, and DB status allows, clear stale state.
       if (this.runningExecutions.has(sessionId)) {
-        throw new Error(`Session ${sessionId} is already running`);
+        if (session.status === "IDLE" || session.status === "PAUSED") {
+          logger.warn(`⚠️ Stale execution state found for session ${sessionId}. Clearing and restarting.`);
+          clearInterval(this.runningExecutions.get(sessionId).updateInterval);
+          this.runningExecutions.delete(sessionId);
+        } else {
+          throw new Error(`Session ${sessionId} is already running`);
+        }
       }
 
       // Get WhatsApp socket
@@ -103,12 +109,27 @@ class BlastExecutionService {
     }
 
     try {
+      const session = await BlastSession.findOne({ where: { sessionId } });
+      const businessHoursConfig = session.config?.businessHours || {};
+
       while (!executionState.isStopped) {
         // Check if paused
         if (executionState.isPaused) {
           logger.info(`⏸️ Session ${sessionId} is paused, waiting...`);
           await this.sleep(5000); // Check every 5 seconds
           continue;
+        }
+
+        // Check business hours
+        if (businessHoursConfig.enabled && !this.isWithinBusinessHours(businessHoursConfig)) {
+          logger.info(`⏰ Session ${sessionId} is outside business hours. Pausing until ${businessHoursConfig.startHour}:00.`);
+          executionState.isPaused = true; // Temporarily pause
+          await this.sleep(60 * 60 * 1000); // Sleep for 1 hour before re-checking
+          continue;
+        } else if (businessHoursConfig.enabled && executionState.isPaused && this.isWithinBusinessHours(businessHoursConfig)) {
+          // If it was paused due to business hours and now it's within, resume
+          logger.info(`✅ Session ${sessionId} is now within business hours. Resuming.`);
+          executionState.isPaused = false;
         }
 
         // Get next batch of messages
@@ -459,6 +480,55 @@ class BlastExecutionService {
       failedCount: executionState.failedCount,
       currentIndex: executionState.currentIndex,
     };
+  }
+
+  /**
+   * Sleep utility
+   * @param {number} ms - Milliseconds to sleep
+   */
+  /**
+   * Check if current time is within business hours
+   * @param {Object} businessHoursConfig - Business hours configuration
+   * @returns {boolean} - True if within business hours, false otherwise
+   */
+  isWithinBusinessHours(businessHoursConfig) {
+    if (!businessHoursConfig || !businessHoursConfig.enabled) {
+      return true; // Business hours not enabled, always within
+    }
+
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentDay = now.getDay(); // 0 for Sunday, 1 for Monday, ..., 6 for Saturday
+
+    const {
+      startHour,
+      endHour,
+      excludeWeekends,
+      excludeLunchBreak,
+      lunchStart,
+      lunchEnd,
+    } = businessHoursConfig;
+
+    // Check weekends
+    if (excludeWeekends && (currentDay === 0 || currentDay === 6)) {
+      return false;
+    }
+
+    // Check business hours
+    if (currentHour < startHour || currentHour >= endHour) {
+      return false;
+    }
+
+    // Check lunch break
+    if (
+      excludeLunchBreak &&
+      currentHour >= lunchStart &&
+      currentHour < lunchEnd
+    ) {
+      return false;
+    }
+
+    return true;
   }
 
   /**

@@ -20,13 +20,13 @@ async function createTestUser() {
     const testUsers = [
       {
         username: "admin",
-        password: "admin123",
+        password: "password",
         role: "Admin",
         isActive: true,
       },
       {
-        username: "user",
-        password: "user123",
+        username: "yayang",
+        password: "12345678",
         role: "User",
         isActive: true,
       },

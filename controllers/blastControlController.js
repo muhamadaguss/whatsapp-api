@@ -6,6 +6,7 @@ const sessionPersistence = require("../utils/sessionPersistence");
 const BlastSession = require("../models/blastSessionModel");
 const BlastMessage = require("../models/blastMessageModel");
 const { AppError } = require("../middleware/errorHandler");
+const blastExecutionService = require("../services/blastExecutionService"); // Import blastExecutionService
 
 const emitSessionUpdate = async () => {
   try {
@@ -101,6 +102,30 @@ const startBlastSession = async (req, res) => {
       throw new AppError("Blast session not found or access denied", 404);
     }
 
+    // Check if business hours are enabled and if current time is outside business hours
+    const businessHoursConfig = session.config?.businessHours;
+    logger.info(`[startBlastSession] Session ${sessionId} businessHoursConfig: ${JSON.stringify(businessHoursConfig)}`);
+    const isWithinHours = blastExecutionService.isWithinBusinessHours(businessHoursConfig);
+    logger.info(`[startBlastSession] Session ${sessionId} isWithinBusinessHours: ${isWithinHours}`);
+
+    let isPausedDueToBusinessHours = false; // Initialize flag
+
+    if (
+      businessHoursConfig &&
+      businessHoursConfig.enabled &&
+      !blastExecutionService.isWithinBusinessHours(businessHoursConfig)
+    ) {
+      logger.info(`Attempting to emit notification for session ${sessionId} due to business hours.`);
+      getSocket().emit("notification", {
+        type: "warning",
+        message: `Blast session ${sessionId} will be paused until business hours (${businessHoursConfig.startHour}:00 - ${businessHoursConfig.endHour}:00).`,
+      });
+      logger.info(
+        `⏰ Notification emitted for session ${sessionId}: Blast session will be paused due to business hours.`
+      );
+      isPausedDueToBusinessHours = true; // Set flag if condition met
+    }
+
     // Start session
     const result = await blastSessionManager.startSession(sessionId);
 
@@ -111,7 +136,10 @@ const startBlastSession = async (req, res) => {
     res.json({
       success: true,
       message: "Blast session started successfully",
-      data: result,
+      data: {
+        ...result, // Include existing result data
+        isPausedDueToBusinessHours: isPausedDueToBusinessHours, // Add the new flag
+      },
     });
   } catch (error) {
     logger.error(`❌ Failed to start blast session ${sessionId}:`, error);
