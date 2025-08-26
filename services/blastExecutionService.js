@@ -13,8 +13,7 @@ const _emitSessionsUpdate = async () => {
       order: [["createdAt", "DESC"]],
     });
     getSocket().emit("sessions-update", sessions);
-  } catch (error)
- {
+  } catch (error) {
     logger.error("Failed to emit session update:", error);
   }
 };
@@ -26,16 +25,25 @@ const _emitSessionsUpdate = async () => {
 class BlastExecutionService {
   constructor() {
     this.runningExecutions = new Map(); // sessionId -> execution state
+    this.businessHoursTimers = new Map(); // sessionId -> timer for auto-resume
+
+    // Start auto-resume scheduler for existing paused sessions
+    this.initializeAutoResumeScheduler();
   }
 
   /**
    * Start executing a blast session
    * @param {string} sessionId - Session ID to execute
+   * @param {boolean} forceStart - Force start ignoring business hours and current status
    * @returns {Promise<Object>} - Execution result
    */
-  async startExecution(sessionId) {
+  async startExecution(sessionId, forceStart = false) {
     try {
-      logger.info(`🚀 Starting blast execution for session: ${sessionId}`);
+      logger.info(
+        `🚀 Starting blast execution for session: ${sessionId}${
+          forceStart ? " (FORCED)" : ""
+        }`
+      );
 
       // Get session details
       const session = await BlastSession.findOne({ where: { sessionId } });
@@ -43,11 +51,54 @@ class BlastExecutionService {
         throw new Error(`Session ${sessionId} not found`);
       }
 
+      // Check business hours first (unless forced)
+      if (!forceStart) {
+        const businessHoursConfig = session.config?.businessHours || {};
+        if (
+          businessHoursConfig.enabled &&
+          !this.isWithinBusinessHours(businessHoursConfig)
+        ) {
+          // Instead of throwing error, update session to PAUSED and schedule for later
+          await session.update({
+            status: "PAUSED",
+            pausedAt: new Date(),
+          });
+
+          // PERBAIKAN: Schedule auto-resume saat campaign di-pause
+          this.scheduleBusinessHoursCheck(sessionId, businessHoursConfig);
+
+          const nextStart = this.getNextBusinessHoursStart(businessHoursConfig);
+          const timeUntilNext = nextStart.getTime() - Date.now();
+          const minutesUntilNext = Math.round(timeUntilNext / (1000 * 60));
+
+          logger.info(
+            `⏰ Session ${sessionId} auto-scheduled for ${nextStart.toLocaleString()} (in ${minutesUntilNext} minutes)`
+          );
+
+          return {
+            success: true,
+            sessionId,
+            message: `Campaign dijadwalkan otomatis resume pada ${nextStart.toLocaleString()} (${minutesUntilNext} menit lagi)`,
+            scheduledFor: nextStart,
+            minutesUntilResume: minutesUntilNext,
+          };
+        }
+      }
+
       // Check if already running in-memory. If so, and DB status allows, clear stale state.
       if (this.runningExecutions.has(sessionId)) {
-        if (session.status === "IDLE" || session.status === "PAUSED") {
-          logger.warn(`⚠️ Stale execution state found for session ${sessionId}. Clearing and restarting.`);
-          clearInterval(this.runningExecutions.get(sessionId).updateInterval);
+        const existingState = this.runningExecutions.get(sessionId);
+        if (
+          session.status === "IDLE" ||
+          session.status === "PAUSED" ||
+          forceStart
+        ) {
+          logger.warn(
+            `⚠️ Stale execution state found for session ${sessionId}. Clearing and restarting.`
+          );
+          if (existingState.updateInterval) {
+            clearInterval(existingState.updateInterval);
+          }
           this.runningExecutions.delete(sessionId);
         } else {
           throw new Error(`Session ${sessionId} is already running`);
@@ -121,15 +172,45 @@ class BlastExecutionService {
         }
 
         // Check business hours
-        if (businessHoursConfig.enabled && !this.isWithinBusinessHours(businessHoursConfig)) {
-          logger.info(`⏰ Session ${sessionId} is outside business hours. Pausing until ${businessHoursConfig.startHour}:00.`);
-          executionState.isPaused = true; // Temporarily pause
-          await this.sleep(60 * 60 * 1000); // Sleep for 1 hour before re-checking
+        if (
+          businessHoursConfig.enabled &&
+          !this.isWithinBusinessHours(businessHoursConfig)
+        ) {
+          if (!executionState.isPaused) {
+            logger.info(
+              `⏰ Session ${sessionId} is outside business hours. Auto-pausing.`
+            );
+            executionState.isPaused = true;
+
+            // Update database status
+            await BlastSession.update(
+              { status: "PAUSED", pausedAt: new Date() },
+              { where: { sessionId } }
+            );
+
+            // Schedule auto-resume check
+            this.scheduleBusinessHoursCheck(sessionId, businessHoursConfig);
+          }
+
+          // Sleep for 1 minute and check again
+          await this.sleep(60 * 1000);
           continue;
-        } else if (businessHoursConfig.enabled && executionState.isPaused && this.isWithinBusinessHours(businessHoursConfig)) {
-          // If it was paused due to business hours and now it's within, resume
-          logger.info(`✅ Session ${sessionId} is now within business hours. Resuming.`);
+        } else if (
+          businessHoursConfig.enabled &&
+          executionState.isPaused &&
+          this.isWithinBusinessHours(businessHoursConfig)
+        ) {
+          // Auto-resume when back in business hours
+          logger.info(
+            `✅ Session ${sessionId} is now within business hours. Auto-resuming.`
+          );
           executionState.isPaused = false;
+
+          // Update database status
+          await BlastSession.update(
+            { status: "RUNNING", resumedAt: new Date() },
+            { where: { sessionId } }
+          );
         }
 
         // Get next batch of messages
@@ -298,12 +379,53 @@ class BlastExecutionService {
    */
   async pauseExecution(sessionId) {
     const executionState = this.runningExecutions.get(sessionId);
+
+    // If no in-memory state, update database directly
     if (!executionState) {
-      throw new Error(`No running execution found for session ${sessionId}`);
+      logger.warn(
+        `⚠️ No in-memory execution state for ${sessionId}, updating database directly`
+      );
+
+      const session = await BlastSession.findOne({ where: { sessionId } });
+      if (!session) {
+        throw new Error(`Session ${sessionId} not found`);
+      }
+
+      await session.update({
+        status: "PAUSED",
+        pausedAt: new Date(),
+      });
+
+      // PERBAIKAN: Schedule auto-resume juga untuk database-only pause
+      const businessHoursConfig = session.config?.businessHours;
+      if (businessHoursConfig?.enabled) {
+        this.scheduleBusinessHoursCheck(sessionId, businessHoursConfig);
+        logger.info(
+          `⏰ Auto-resume scheduled for ${sessionId} (database-only pause)`
+        );
+      }
+
+      logger.info(`⏸️ Session ${sessionId} paused (database only)`);
+
+      return {
+        success: true,
+        sessionId,
+        message: "Session paused (database updated) with auto-resume scheduled",
+      };
     }
 
+    // Normal pause with in-memory state
     executionState.isPaused = true;
     executionState.pausedAt = new Date();
+
+    // Also update database
+    await BlastSession.update(
+      {
+        status: "PAUSED",
+        pausedAt: new Date(),
+      },
+      { where: { sessionId } }
+    );
 
     logger.info(`⏸️ Execution paused for session ${sessionId}`);
 
@@ -319,13 +441,47 @@ class BlastExecutionService {
    * @param {string} sessionId - Session ID
    */
   async resumeExecution(sessionId) {
-    const executionState = this.runningExecutions.get(sessionId);
-    if (!executionState) {
-      throw new Error(`No execution found for session ${sessionId}`);
+    // Clear business hours timer if exists
+    if (this.businessHoursTimers.has(sessionId)) {
+      clearTimeout(this.businessHoursTimers.get(sessionId));
+      this.businessHoursTimers.delete(sessionId);
     }
 
+    const executionState = this.runningExecutions.get(sessionId);
+
+    // If no in-memory state, restart execution
+    if (!executionState) {
+      logger.warn(
+        `⚠️ No in-memory execution state for ${sessionId}, restarting execution`
+      );
+
+      const session = await BlastSession.findOne({ where: { sessionId } });
+      if (!session) {
+        throw new Error(`Session ${sessionId} not found`);
+      }
+
+      // Update status to RUNNING and restart
+      await session.update({
+        status: "RUNNING",
+        resumedAt: new Date(),
+      });
+
+      // Start execution (don't force start, let it check business hours normally)
+      return this.startExecution(sessionId, false);
+    }
+
+    // Normal resume with in-memory state
     executionState.isPaused = false;
     executionState.resumedAt = new Date();
+
+    // Also update database
+    await BlastSession.update(
+      {
+        status: "RUNNING",
+        resumedAt: new Date(),
+      },
+      { where: { sessionId } }
+    );
 
     logger.info(`▶️ Execution resumed for session ${sessionId}`);
 
@@ -351,6 +507,12 @@ class BlastExecutionService {
 
     // Clear update interval
     clearInterval(executionState.updateInterval);
+
+    // Clear business hours timer if exists
+    if (this.businessHoursTimers.has(sessionId)) {
+      clearTimeout(this.businessHoursTimers.get(sessionId));
+      this.businessHoursTimers.delete(sessionId);
+    }
 
     // Remove from running executions
     this.runningExecutions.delete(sessionId);
@@ -501,12 +663,12 @@ class BlastExecutionService {
     const currentDay = now.getDay(); // 0 for Sunday, 1 for Monday, ..., 6 for Saturday
 
     const {
-      startHour,
-      endHour,
-      excludeWeekends,
-      excludeLunchBreak,
-      lunchStart,
-      lunchEnd,
+      startHour = 8,
+      endHour = 17,
+      excludeWeekends = false,
+      excludeLunchBreak = false,
+      lunchStart = 12,
+      lunchEnd = 13,
     } = businessHoursConfig;
 
     // Check weekends
@@ -519,9 +681,9 @@ class BlastExecutionService {
       return false;
     }
 
-    // Check lunch break
+    // PERBAIKAN: Hanya check lunch break jika excludeLunchBreak = true
     if (
-      excludeLunchBreak &&
+      excludeLunchBreak === true &&
       currentHour >= lunchStart &&
       currentHour < lunchEnd
     ) {
@@ -545,6 +707,289 @@ class BlastExecutionService {
    */
   getRunningExecutions() {
     return Array.from(this.runningExecutions.values());
+  }
+
+  /**
+   * Cleanup all timers and running executions (for graceful shutdown)
+   */
+  cleanup() {
+    logger.info("🧹 Cleaning up blast execution service...");
+
+    // Clear all business hours timers
+    for (const [sessionId, timer] of this.businessHoursTimers) {
+      clearTimeout(timer);
+      logger.debug(`⏰ Cleared timer for session ${sessionId}`);
+    }
+    this.businessHoursTimers.clear();
+
+    // Clear all execution intervals
+    for (const [sessionId, executionState] of this.runningExecutions) {
+      if (executionState.updateInterval) {
+        clearInterval(executionState.updateInterval);
+        logger.debug(`⏹️ Cleared interval for session ${sessionId}`);
+      }
+    }
+
+    logger.info("✅ Blast execution service cleanup completed");
+  }
+
+  /**
+   * Get next business hours start time
+   * @param {Object} businessHoursConfig - Business hours configuration
+   * @returns {Date} - Next business hours start time
+   */
+  getNextBusinessHoursStart(businessHoursConfig) {
+    const now = new Date();
+    const { startHour = 8, excludeWeekends = false } = businessHoursConfig;
+
+    let nextStart = new Date();
+    nextStart.setHours(startHour, 0, 0, 0);
+
+    // If start time has passed today, move to tomorrow
+    if (nextStart <= now) {
+      nextStart.setDate(nextStart.getDate() + 1);
+    }
+
+    // Skip weekends if configured
+    if (excludeWeekends) {
+      while (nextStart.getDay() === 0 || nextStart.getDay() === 6) {
+        nextStart.setDate(nextStart.getDate() + 1);
+      }
+    }
+
+    return nextStart;
+  }
+
+  /**
+   * Initialize auto-resume scheduler for existing paused sessions
+   */
+  async initializeAutoResumeScheduler() {
+    try {
+      logger.info(
+        "🔄 Initializing auto-resume scheduler for paused sessions..."
+      );
+
+      const pausedSessions = await BlastSession.findAll({
+        where: { status: "PAUSED" },
+      });
+
+      logger.info(`📊 Found ${pausedSessions.length} paused sessions to check`);
+
+      for (const session of pausedSessions) {
+        const businessHoursConfig = session.config?.businessHours;
+        if (businessHoursConfig?.enabled) {
+          // Check if should resume immediately
+          if (this.isWithinBusinessHours(businessHoursConfig)) {
+            logger.info(
+              `🚀 Auto-resuming paused session ${session.sessionId} - within business hours`
+            );
+            await this.resumeExecution(session.sessionId);
+          } else {
+            // Schedule for later
+            this.scheduleBusinessHoursCheck(
+              session.sessionId,
+              businessHoursConfig
+            );
+            logger.info(
+              `⏰ Scheduled auto-resume for session ${session.sessionId}`
+            );
+          }
+        }
+      }
+
+      logger.info("✅ Auto-resume scheduler initialization completed");
+    } catch (error) {
+      logger.error("❌ Failed to initialize auto-resume scheduler:", error);
+    }
+  }
+
+  /**
+   * Schedule business hours check for auto-resume
+   * @param {string} sessionId - Session ID
+   * @param {Object} businessHoursConfig - Business hours configuration
+   */
+  scheduleBusinessHoursCheck(sessionId, businessHoursConfig) {
+    // Clear existing timer if any
+    if (this.businessHoursTimers.has(sessionId)) {
+      clearTimeout(this.businessHoursTimers.get(sessionId));
+    }
+
+    const nextCheckTime = this.getNextBusinessHoursStart(businessHoursConfig);
+    const timeUntilNext = nextCheckTime.getTime() - Date.now();
+
+    // Don't schedule if it's more than 24 hours away, schedule for next hour instead
+    const scheduleTime =
+      timeUntilNext > 24 * 60 * 60 * 1000 ? 60 * 60 * 1000 : timeUntilNext;
+
+    logger.info(
+      `⏰ Scheduling auto-resume check for session ${sessionId} in ${Math.round(
+        scheduleTime / 60000
+      )} minutes`
+    );
+
+    const timer = setTimeout(async () => {
+      try {
+        // Remove timer from map
+        this.businessHoursTimers.delete(sessionId);
+
+        const session = await BlastSession.findOne({ where: { sessionId } });
+        if (!session || session.status !== "PAUSED") {
+          return; // Session no longer exists or not paused
+        }
+
+        if (this.isWithinBusinessHours(businessHoursConfig)) {
+          logger.info(
+            `🚀 Auto-resuming session ${sessionId} - business hours started`
+          );
+          await this.resumeExecution(sessionId);
+        } else {
+          // Schedule next check
+          this.scheduleBusinessHoursCheck(sessionId, businessHoursConfig);
+        }
+      } catch (error) {
+        logger.error(`❌ Failed to auto-resume session ${sessionId}:`, error);
+        // Schedule retry in 10 minutes
+        setTimeout(() => {
+          this.scheduleBusinessHoursCheck(sessionId, businessHoursConfig);
+        }, 10 * 60 * 1000);
+      }
+    }, scheduleTime);
+
+    this.businessHoursTimers.set(sessionId, timer);
+  }
+
+  /**
+   * Schedule business hours check for auto-resume
+   * @param {string} sessionId - Session ID
+   * @param {Object} businessHoursConfig - Business hours configuration
+   */
+  scheduleBusinessHoursCheck(sessionId, businessHoursConfig) {
+    const nextCheckTime = this.getNextBusinessHoursStart(businessHoursConfig);
+    const timeUntilNext = nextCheckTime.getTime() - Date.now();
+
+    // Don't schedule if it's more than 24 hours away
+    if (timeUntilNext > 24 * 60 * 60 * 1000) {
+      return;
+    }
+
+    logger.info(
+      `⏰ Scheduling auto-resume for session ${sessionId} at ${nextCheckTime.toLocaleString()}`
+    );
+
+    setTimeout(async () => {
+      try {
+        const session = await BlastSession.findOne({ where: { sessionId } });
+        if (!session || session.status !== "PAUSED") {
+          return; // Session no longer exists or not paused
+        }
+
+        if (this.isWithinBusinessHours(businessHoursConfig)) {
+          logger.info(
+            `🚀 Auto-resuming session ${sessionId} - business hours started`
+          );
+          await this.resumeExecution(sessionId);
+        } else {
+          // Schedule next check
+          this.scheduleBusinessHoursCheck(sessionId, businessHoursConfig);
+        }
+      } catch (error) {
+        logger.error(`❌ Failed to auto-resume session ${sessionId}:`, error);
+      }
+    }, timeUntilNext);
+  }
+
+  /**
+   * Force start a session (bypass business hours)
+   * @param {string} sessionId - Session ID
+   * @returns {Promise<Object>} - Start result
+   */
+  async forceStartExecution(sessionId) {
+    return this.startExecution(sessionId, true);
+  }
+
+  /**
+   * Initialize auto-resume scheduler for existing paused sessions
+   */
+  async initializeAutoResumeScheduler() {
+    try {
+      const pausedSessions = await BlastSession.findAll({
+        where: { status: "PAUSED" },
+      });
+
+      for (const session of pausedSessions) {
+        const businessHoursConfig = session.config?.businessHours;
+        if (businessHoursConfig?.enabled) {
+          // Check if should resume immediately
+          if (this.isWithinBusinessHours(businessHoursConfig)) {
+            logger.info(
+              `🚀 Auto-resuming paused session ${session.sessionId} - within business hours`
+            );
+            await this.resumeExecution(session.sessionId);
+          } else {
+            // Schedule for later
+            this.scheduleBusinessHoursCheck(
+              session.sessionId,
+              businessHoursConfig
+            );
+          }
+        }
+      }
+    } catch (error) {
+      logger.error("❌ Failed to initialize auto-resume scheduler:", error);
+    }
+  }
+
+  /**
+   * Recover execution state after server restart
+   * @param {string} sessionId - Session ID
+   * @returns {Promise<Object>} - Recovery result
+   */
+  async recoverExecution(sessionId) {
+    try {
+      const session = await BlastSession.findOne({ where: { sessionId } });
+      if (!session) {
+        throw new Error(`Session ${sessionId} not found`);
+      }
+
+      // Only recover if session was actually running
+      if (session.status === "RUNNING") {
+        logger.info(`🔄 Recovering execution for session: ${sessionId}`);
+        return this.startExecution(sessionId, true); // Force start to bypass checks
+      } else if (session.status === "PAUSED") {
+        logger.info(
+          `⏸️ Session ${sessionId} was paused, setting up auto-resume`
+        );
+
+        // Set up auto-resume for paused sessions
+        const businessHoursConfig = session.config?.businessHours;
+        if (businessHoursConfig?.enabled) {
+          if (this.isWithinBusinessHours(businessHoursConfig)) {
+            logger.info(
+              `🚀 Auto-resuming session ${sessionId} - within business hours`
+            );
+            return this.resumeExecution(sessionId);
+          } else {
+            this.scheduleBusinessHoursCheck(sessionId, businessHoursConfig);
+          }
+        }
+
+        return {
+          success: true,
+          sessionId,
+          message: "Session remains paused with auto-resume scheduled",
+          status: "PAUSED",
+        };
+      }
+
+      return {
+        success: false,
+        sessionId,
+        message: `Session status ${session.status} does not require recovery`,
+      };
+    } catch (error) {
+      logger.error(`❌ Failed to recover execution for ${sessionId}:`, error);
+      throw error;
+    }
   }
 }
 

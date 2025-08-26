@@ -580,6 +580,40 @@ const getSessionStats = async (req, res) => {
   }
 };
 
+/**
+ * Force start blast session (bypass business hours)
+ */
+const forceStartBlastSession = async (req, res) => {
+  const { sessionId } = req.params;
+
+  try {
+    // Verify session ownership
+    const session = await BlastSession.findOne({
+      where: { sessionId, userId: req.user.id },
+    });
+
+    if (!session) {
+      throw new AppError("Blast session not found or access denied", 404);
+    }
+
+    // Force start session (bypass business hours)
+    const result = await blastExecutionService.forceStartExecution(sessionId);
+
+    logger.info(
+      `🚀 Blast session force started by user ${req.user.id}: ${sessionId}`
+    );
+
+    res.json({
+      success: true,
+      message: "Blast session force started successfully",
+      data: result,
+    });
+  } catch (error) {
+    logger.error(`❌ Failed to force start blast session ${sessionId}:`, error);
+    throw new AppError(`Failed to force start blast session: ${error.message}`, 500);
+  }
+};
+
 const handleSessionAction = async (req, res) => {
   const { sessionId } = req.params;
   const { action } = req.body;
@@ -587,6 +621,8 @@ const handleSessionAction = async (req, res) => {
   switch (action) {
     case "start":
       return startBlastSession(req, res);
+    case "force-start":
+      return forceStartBlastSession(req, res);
     case "pause":
       return pauseBlastSession(req, res);
     case "resume":
@@ -601,6 +637,7 @@ const handleSessionAction = async (req, res) => {
 module.exports = {
   createBlastSession,
   startBlastSession,
+  forceStartBlastSession,
   pauseBlastSession,
   resumeBlastSession,
   stopBlastSession,

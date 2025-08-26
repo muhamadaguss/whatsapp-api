@@ -26,6 +26,10 @@ router.post(
   asyncHandler(blastControlController.startBlastSession)
 );
 router.post(
+  "/force-start/:sessionId",
+  asyncHandler(blastControlController.forceStartBlastSession)
+);
+router.post(
   "/pause/:sessionId",
   asyncHandler(blastControlController.pauseBlastSession)
 );
