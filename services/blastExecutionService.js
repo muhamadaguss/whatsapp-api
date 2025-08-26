@@ -71,6 +71,19 @@ class BlastExecutionService {
           const timeUntilNext = nextStart.getTime() - Date.now();
           const minutesUntilNext = Math.round(timeUntilNext / (1000 * 60));
 
+          // PERBAIKAN: Add detailed logging untuk debug timezone issue
+          const now = new Date();
+          logger.info(`⏰ Session ${sessionId} scheduling details:`);
+          logger.info(
+            `   Current time: ${now.toISOString()} (UTC) / ${now.toLocaleString()} (Local)`
+          );
+          logger.info(
+            `   Business start hour: ${businessHoursConfig.startHour || 8}`
+          );
+          logger.info(
+            `   Next start time: ${nextStart.toISOString()} (UTC) / ${nextStart.toLocaleString()} (Local)`
+          );
+          logger.info(`   Time until next: ${minutesUntilNext} minutes`);
           logger.info(
             `⏰ Session ${sessionId} auto-scheduled for ${nextStart.toLocaleString()} (in ${minutesUntilNext} minutes)`
           );
@@ -797,21 +810,126 @@ class BlastExecutionService {
    */
   getNextBusinessHoursStart(businessHoursConfig) {
     const now = new Date();
-    const { startHour = 8, excludeWeekends = false } = businessHoursConfig;
+    let {
+      startHour = 8,
+      excludeWeekends = false,
+      timezone = "local",
+    } = businessHoursConfig;
+
+    // PERBAIKAN: Validate startHour untuk mencegah bug 439 menit
+    if (typeof startHour !== "number" || startHour < 0 || startHour > 23) {
+      logger.warn(
+        `❌ INVALID startHour: ${startHour} (type: ${typeof startHour}). Using default: 8`
+      );
+      startHour = 8;
+    }
+
+    // PERBAIKAN: Add detailed logging untuk debug timezone issue
+    logger.info(`🔍 Business hours calculation:`);
+    logger.info(
+      `   Current time: ${now.toLocaleString()} (${now.toISOString()})`
+    );
+    logger.info(
+      `   Server timezone offset: ${now.getTimezoneOffset()} minutes`
+    );
+    logger.info(`   Configured startHour: ${startHour}`);
+    logger.info(`   Timezone mode: ${timezone}`);
 
     let nextStart = new Date();
-    nextStart.setHours(startHour, 0, 0, 0);
 
-    // If start time has passed today, move to tomorrow
+    // PERBAIKAN: Handle WIB timezone conversion
+    // Jika server menggunakan UTC tapi business hours untuk WIB
+    if (now.getTimezoneOffset() === 0) {
+      // Server is UTC
+      // Convert WIB startHour (UTC+7) ke UTC
+      const wibStartHourUTC = (startHour - 7 + 24) % 24;
+      logger.info(
+        `   Converting WIB startHour ${startHour} to UTC: ${wibStartHourUTC}`
+      );
+      nextStart.setUTCHours(wibStartHourUTC, 0, 0, 0);
+    } else {
+      // Server menggunakan local timezone
+      nextStart.setHours(startHour, 0, 0, 0);
+    }
+
+    logger.info(`   Initial next start: ${nextStart.toLocaleString()}`);
+    logger.info(`   nextStart <= now: ${nextStart <= now}`);
+
+    // PERBAIKAN: Check apakah start time hari ini sudah lewat
+    // Jika sekarang jam 19:40 dan startHour 20, maka nextStart tetap hari ini
     if (nextStart <= now) {
+      // Jika start time hari ini sudah lewat, pindah ke besok
       nextStart.setDate(nextStart.getDate() + 1);
+
+      // Reset time dengan timezone handling
+      if (now.getTimezoneOffset() === 0) {
+        // Server is UTC
+        const wibStartHourUTC = (startHour - 7 + 24) % 24;
+        nextStart.setUTCHours(wibStartHourUTC, 0, 0, 0);
+      } else {
+        nextStart.setHours(startHour, 0, 0, 0);
+      }
+
+      logger.info(`   Moved to tomorrow: ${nextStart.toLocaleString()}`);
     }
 
     // Skip weekends if configured
     if (excludeWeekends) {
       while (nextStart.getDay() === 0 || nextStart.getDay() === 6) {
         nextStart.setDate(nextStart.getDate() + 1);
+
+        // Reset time dengan timezone handling
+        if (now.getTimezoneOffset() === 0) {
+          // Server is UTC
+          const wibStartHourUTC = (startHour - 7 + 24) % 24;
+          nextStart.setUTCHours(wibStartHourUTC, 0, 0, 0);
+        } else {
+          nextStart.setHours(startHour, 0, 0, 0);
+        }
+
+        logger.info(`   Skipped weekend: ${nextStart.toLocaleString()}`);
       }
+    }
+
+    const timeUntilNext = nextStart.getTime() - now.getTime();
+    const minutesUntilNext = Math.round(timeUntilNext / (1000 * 60));
+
+    logger.info(`   Final next start: ${nextStart.toLocaleString()}`);
+    logger.info(`   Minutes until next: ${minutesUntilNext}`);
+
+    // PERBAIKAN: Warning jika hasil tidak masuk akal
+    if (minutesUntilNext > 24 * 60) {
+      logger.warn(
+        `⚠️ WARNING: Next start lebih dari 24 jam! (${minutesUntilNext} minutes)`
+      );
+    }
+
+    if (minutesUntilNext < 0) {
+      logger.error(
+        `❌ ERROR: Negative time until next! (${minutesUntilNext} minutes)`
+      );
+    }
+
+    // PERBAIKAN: Special detection untuk 439 menit issue
+    if (
+      Math.abs(minutesUntilNext - 439) < 10 ||
+      Math.abs(minutesUntilNext - 426) < 10
+    ) {
+      logger.warn(
+        `🚨 DETECTED timezone scheduling issue! (${minutesUntilNext} minutes)`
+      );
+      logger.warn(`   This usually indicates timezone misconfiguration`);
+      logger.warn(
+        `   startHour ${startHour} might be interpreted as UTC instead of WIB`
+      );
+      logger.warn(
+        `   Server timezone offset: ${now.getTimezoneOffset()} minutes`
+      );
+      logger.warn(
+        `   Applied timezone conversion: ${
+          now.getTimezoneOffset() === 0 ? "YES" : "NO"
+        }`
+      );
     }
 
     return nextStart;
