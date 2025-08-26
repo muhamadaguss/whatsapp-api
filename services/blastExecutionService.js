@@ -498,21 +498,66 @@ class BlastExecutionService {
    */
   async stopExecution(sessionId) {
     const executionState = this.runningExecutions.get(sessionId);
+
+    // If no in-memory state, update database directly
     if (!executionState) {
-      throw new Error(`No running execution found for session ${sessionId}`);
+      logger.warn(
+        `⚠️ No in-memory execution state for ${sessionId}, updating database directly`
+      );
+
+      const session = await BlastSession.findOne({ where: { sessionId } });
+      if (!session) {
+        throw new Error(`Session ${sessionId} not found`);
+      }
+
+      // Update database status to STOPPED
+      await session.update({
+        status: "STOPPED",
+        stoppedAt: new Date(),
+      });
+
+      // Clear business hours timer if exists
+      if (this.businessHoursTimers.has(sessionId)) {
+        clearTimeout(this.businessHoursTimers.get(sessionId));
+        this.businessHoursTimers.delete(sessionId);
+        logger.info(`⏰ Cleared auto-resume timer for ${sessionId}`);
+      }
+
+      logger.info(`⏹️ Session ${sessionId} stopped (database only)`);
+
+      // Emit update
+      _emitSessionsUpdate();
+
+      return {
+        success: true,
+        sessionId,
+        message: "Session stopped (database updated)",
+      };
     }
 
+    // Normal stop with in-memory state
     executionState.isStopped = true;
     executionState.stoppedAt = new Date();
 
     // Clear update interval
-    clearInterval(executionState.updateInterval);
+    if (executionState.updateInterval) {
+      clearInterval(executionState.updateInterval);
+    }
 
     // Clear business hours timer if exists
     if (this.businessHoursTimers.has(sessionId)) {
       clearTimeout(this.businessHoursTimers.get(sessionId));
       this.businessHoursTimers.delete(sessionId);
     }
+
+    // Update database
+    await BlastSession.update(
+      {
+        status: "STOPPED",
+        stoppedAt: new Date(),
+      },
+      { where: { sessionId } }
+    );
 
     // Remove from running executions
     this.runningExecutions.delete(sessionId);
@@ -536,12 +581,23 @@ class BlastExecutionService {
   async completeExecution(sessionId) {
     try {
       const executionState = this.runningExecutions.get(sessionId);
+
+      // Handle in-memory state if exists
       if (executionState) {
         executionState.status = "COMPLETED";
         executionState.completedAt = new Date();
+
+        // Clear update interval
+        if (executionState.updateInterval) {
+          clearInterval(executionState.updateInterval);
+        }
+      } else {
+        logger.warn(
+          `⚠️ No in-memory execution state for ${sessionId} during completion`
+        );
       }
 
-      // Update session status
+      // Update session status in database
       await BlastSession.update(
         {
           status: "COMPLETED",
@@ -550,9 +606,10 @@ class BlastExecutionService {
         { where: { sessionId } }
       );
 
-      // Clear update interval
-      if (executionState) {
-        clearInterval(executionState.updateInterval);
+      // Clear business hours timer if exists
+      if (this.businessHoursTimers.has(sessionId)) {
+        clearTimeout(this.businessHoursTimers.get(sessionId));
+        this.businessHoursTimers.delete(sessionId);
       }
 
       // Remove from running executions
