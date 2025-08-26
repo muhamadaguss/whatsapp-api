@@ -71,21 +71,8 @@ class BlastExecutionService {
           const timeUntilNext = nextStart.getTime() - Date.now();
           const minutesUntilNext = Math.round(timeUntilNext / (1000 * 60));
 
-          // PERBAIKAN: Add detailed logging untuk debug timezone issue
-          const now = new Date();
-          logger.info(`⏰ Session ${sessionId} scheduling details:`);
           logger.info(
-            `   Current time: ${now.toISOString()} (UTC) / ${now.toLocaleString()} (Local)`
-          );
-          logger.info(
-            `   Business start hour: ${businessHoursConfig.startHour || 8}`
-          );
-          logger.info(
-            `   Next start time: ${nextStart.toISOString()} (UTC) / ${nextStart.toLocaleString()} (Local)`
-          );
-          logger.info(`   Time until next: ${minutesUntilNext} minutes`);
-          logger.info(
-            `⏰ Session ${sessionId} auto-scheduled for ${nextStart.toLocaleString()} (in ${minutesUntilNext} minutes)`
+            `⏰ Session ${sessionId} scheduled for ${nextStart.toLocaleString()} (in ${minutesUntilNext} minutes)`
           );
 
           return {
@@ -725,31 +712,12 @@ class BlastExecutionService {
    */
   isWithinBusinessHours(businessHoursConfig) {
     if (!businessHoursConfig || !businessHoursConfig.enabled) {
-      return true; // Business hours not enabled, always within
+      return true;
     }
 
     const now = new Date();
-
-    // PERBAIKAN: Handle timezone properly for business hours check
-    let currentHour, currentDay;
-    if (now.getTimezoneOffset() === 0) {
-      // Server is UTC, convert to WIB for business hours check
-      currentHour = (now.getUTCHours() + 7) % 24;
-      currentDay = now.getUTCDay();
-
-      // Adjust day if hour rollover to next day
-      if (now.getUTCHours() + 7 >= 24) {
-        currentDay = (currentDay + 1) % 7;
-      }
-
-      logger.debug(
-        `   Business hours check - UTC: ${now.toISOString()}, WIB hour: ${currentHour}`
-      );
-    } else {
-      // Server uses local timezone
-      currentHour = now.getHours();
-      currentDay = now.getDay();
-    }
+    const currentHour = now.getHours();
+    const currentDay = now.getDay();
 
     const {
       startHour = 8,
@@ -760,37 +728,25 @@ class BlastExecutionService {
       lunchEnd = 13,
     } = businessHoursConfig;
 
-    logger.debug(
-      `   Business hours check: ${currentHour}:xx on day ${currentDay}, range ${startHour}-${endHour}`
-    );
-
-    // Check weekends
+    // Check weekends (0 = Sunday, 6 = Saturday)
     if (excludeWeekends && (currentDay === 0 || currentDay === 6)) {
-      logger.debug(`   ❌ Weekend excluded (day ${currentDay})`);
       return false;
     }
 
     // Check business hours
     if (currentHour < startHour || currentHour >= endHour) {
-      logger.debug(
-        `   ❌ Outside business hours (${currentHour} not in ${startHour}-${endHour})`
-      );
       return false;
     }
 
-    // PERBAIKAN: Hanya check lunch break jika excludeLunchBreak = true
+    // Check lunch break
     if (
-      excludeLunchBreak === true &&
+      excludeLunchBreak &&
       currentHour >= lunchStart &&
       currentHour < lunchEnd
     ) {
-      logger.debug(
-        `   ❌ Lunch break excluded (${currentHour} in ${lunchStart}-${lunchEnd})`
-      );
       return false;
     }
 
-    logger.debug(`   ✅ Within business hours`);
     return true;
   }
 
@@ -841,156 +797,27 @@ class BlastExecutionService {
    */
   getNextBusinessHoursStart(businessHoursConfig) {
     const now = new Date();
-    let {
-      startHour = 8,
-      excludeWeekends = false,
-      timezone = "local",
-    } = businessHoursConfig;
+    const { startHour = 8, excludeWeekends = false } = businessHoursConfig;
 
-    // PERBAIKAN: Validate startHour untuk mencegah bug 439 menit
-    if (typeof startHour !== "number" || startHour < 0 || startHour > 23) {
-      logger.warn(
-        `❌ INVALID startHour: ${startHour} (type: ${typeof startHour}). Using default: 8`
-      );
-      startHour = 8;
+    // If currently within business hours, start immediately
+    if (this.isWithinBusinessHours(businessHoursConfig)) {
+      return now;
     }
 
-    // PERBAIKAN: Add detailed logging untuk debug timezone issue
-    logger.info(`🔍 Business hours calculation:`);
-    logger.info(
-      `   Current time: ${now.toLocaleString()} (${now.toISOString()})`
-    );
-    logger.info(
-      `   Server timezone offset: ${now.getTimezoneOffset()} minutes`
-    );
-    logger.info(`   Configured startHour: ${startHour}`);
-    logger.info(`   Timezone mode: ${timezone}`);
-
-    // PERBAIKAN: Check if currently within business hours
-    const isCurrentlyWithinBusinessHours =
-      this.isWithinBusinessHours(businessHoursConfig);
-    logger.info(
-      `   Currently within business hours: ${isCurrentlyWithinBusinessHours}`
-    );
-
-    if (isCurrentlyWithinBusinessHours) {
-      logger.info(`   ✅ Starting immediately - within business hours`);
-      return now; // Start immediately
-    }
-
+    // Calculate next start time
     let nextStart = new Date();
+    nextStart.setHours(startHour, 0, 0, 0);
 
-    // PERBAIKAN: Proper WIB timezone handling
-    if (now.getTimezoneOffset() === 0) {
-      // Server is UTC, convert WIB business hours to UTC
-      const startHourUTC = (startHour - 7 + 24) % 24;
-
-      logger.info(
-        `   Converting WIB startHour ${startHour} to UTC: ${startHourUTC}`
-      );
-      logger.info(`   Current UTC time: ${now.toISOString()}`);
-
-      // Set target time in UTC
-      nextStart.setUTCHours(startHourUTC, 0, 0, 0);
-
-      logger.info(`   Target UTC time: ${nextStart.toISOString()}`);
-      logger.info(
-        `   Target WIB time: ${nextStart.toLocaleString("id-ID", {
-          timeZone: "Asia/Jakarta",
-        })}`
-      );
-      logger.info(`   UTC comparison: ${nextStart <= now}`);
-
-      // Check if start time has passed today
-      if (nextStart <= now) {
-        nextStart.setUTCDate(nextStart.getUTCDate() + 1);
-        nextStart.setUTCHours(startHourUTC, 0, 0, 0);
-        logger.info(`   Moved to tomorrow UTC: ${nextStart.toISOString()}`);
-        logger.info(
-          `   Tomorrow WIB: ${nextStart.toLocaleString("id-ID", {
-            timeZone: "Asia/Jakarta",
-          })}`
-        );
-      }
-    } else {
-      // Server menggunakan local timezone
-      nextStart.setHours(startHour, 0, 0, 0);
-
-      logger.info(`   Initial next start: ${nextStart.toLocaleString()}`);
-      logger.info(`   nextStart <= now: ${nextStart <= now}`);
-
-      if (nextStart <= now) {
-        nextStart.setDate(nextStart.getDate() + 1);
-        nextStart.setHours(startHour, 0, 0, 0);
-        logger.info(`   Moved to tomorrow: ${nextStart.toLocaleString()}`);
-      }
+    // If time has passed today, move to tomorrow
+    if (nextStart <= now) {
+      nextStart.setDate(nextStart.getDate() + 1);
     }
 
     // Skip weekends if configured
     if (excludeWeekends) {
-      if (now.getTimezoneOffset() === 0) {
-        // Handle weekends in UTC (check WIB day)
-        const startHourUTC = (startHour - 7 + 24) % 24;
-
-        while (nextStart.getDay() === 0 || nextStart.getDay() === 6) {
-          nextStart.setUTCDate(nextStart.getUTCDate() + 1);
-          nextStart.setUTCHours(startHourUTC, 0, 0, 0);
-          logger.info(`   Skipped weekend UTC: ${nextStart.toISOString()}`);
-          logger.info(
-            `   Skipped weekend WIB: ${nextStart.toLocaleString("id-ID", {
-              timeZone: "Asia/Jakarta",
-            })}`
-          );
-        }
-      } else {
-        // Server local timezone
-        while (nextStart.getDay() === 0 || nextStart.getDay() === 6) {
-          nextStart.setDate(nextStart.getDate() + 1);
-          nextStart.setHours(startHour, 0, 0, 0);
-          logger.info(`   Skipped weekend: ${nextStart.toLocaleString()}`);
-        }
+      while (nextStart.getDay() === 0 || nextStart.getDay() === 6) {
+        nextStart.setDate(nextStart.getDate() + 1);
       }
-    }
-
-    const timeUntilNext = nextStart.getTime() - now.getTime();
-    const minutesUntilNext = Math.round(timeUntilNext / (1000 * 60));
-
-    logger.info(`   Final next start: ${nextStart.toLocaleString()}`);
-    logger.info(`   Minutes until next: ${minutesUntilNext}`);
-
-    // PERBAIKAN: Warning jika hasil tidak masuk akal
-    if (minutesUntilNext > 24 * 60) {
-      logger.warn(
-        `⚠️ WARNING: Next start lebih dari 24 jam! (${minutesUntilNext} minutes)`
-      );
-    }
-
-    if (minutesUntilNext < 0) {
-      logger.error(
-        `❌ ERROR: Negative time until next! (${minutesUntilNext} minutes)`
-      );
-    }
-
-    // PERBAIKAN: Special detection untuk 439 menit issue
-    if (
-      Math.abs(minutesUntilNext - 439) < 10 ||
-      Math.abs(minutesUntilNext - 426) < 10
-    ) {
-      logger.warn(
-        `🚨 DETECTED timezone scheduling issue! (${minutesUntilNext} minutes)`
-      );
-      logger.warn(`   This usually indicates timezone misconfiguration`);
-      logger.warn(
-        `   startHour ${startHour} might be interpreted as UTC instead of WIB`
-      );
-      logger.warn(
-        `   Server timezone offset: ${now.getTimezoneOffset()} minutes`
-      );
-      logger.warn(
-        `   Applied timezone conversion: ${
-          now.getTimezoneOffset() === 0 ? "YES" : "NO"
-        }`
-      );
     }
 
     return nextStart;
