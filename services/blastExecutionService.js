@@ -12,9 +12,43 @@ const _emitSessionsUpdate = async () => {
     const sessions = await BlastSession.findAll({
       order: [["createdAt", "DESC"]],
     });
-    getSocket().emit("sessions-update", sessions);
+
+    const socket = getSocket();
+    if (socket) {
+      socket.emit("sessions-update", sessions);
+      logger.debug(`📡 Emitted sessions update: ${sessions.length} sessions`);
+    } else {
+      logger.warn("⚠️ Socket not available for sessions update");
+    }
   } catch (error) {
-    logger.error("Failed to emit session update:", error);
+    logger.error("❌ Failed to emit session update:", error);
+  }
+};
+
+/**
+ * Emit toast notification to frontend
+ * @param {string} type - Toast type: 'success', 'error', 'warning', 'info'
+ * @param {string} title - Toast title
+ * @param {string} description - Toast description
+ * @param {string} sessionId - Session ID (optional)
+ */
+const _emitToastNotification = (type, title, description, sessionId = null) => {
+  try {
+    const socket = getSocket();
+    if (socket) {
+      socket.emit("toast-notification", {
+        type,
+        title,
+        description,
+        sessionId,
+        timestamp: new Date().toISOString(),
+      });
+      logger.debug(`🍞 Emitted toast: ${type} - ${title}`);
+    } else {
+      logger.warn("⚠️ Socket not available for toast notification");
+    }
+  } catch (error) {
+    logger.error("❌ Failed to emit toast notification:", error);
   }
 };
 
@@ -75,6 +109,17 @@ class BlastExecutionService {
             `⏰ Session ${sessionId} scheduled for ${nextStart.toLocaleString()} (in ${minutesUntilNext} minutes)`
           );
 
+          // Emit UI update for paused status
+          _emitSessionsUpdate();
+
+          // Emit toast notification for auto-scheduling
+          _emitToastNotification(
+            "info",
+            "Campaign Dijadwalkan",
+            `Campaign akan otomatis dimulai pada ${nextStart.toLocaleString()} (${minutesUntilNext} menit lagi)`,
+            sessionId
+          );
+
           return {
             success: true,
             sessionId,
@@ -113,6 +158,12 @@ class BlastExecutionService {
         );
       }
 
+      // Update database status to RUNNING first
+      await session.update({
+        status: "RUNNING",
+        startedAt: new Date(),
+      });
+
       // Start execution
       const executionState = {
         sessionId,
@@ -132,6 +183,17 @@ class BlastExecutionService {
       const updateInterval = setInterval(_emitSessionsUpdate, 2000); // Update every 2 seconds
 
       executionState.updateInterval = updateInterval;
+
+      // Emit immediate UI update for running status
+      _emitSessionsUpdate();
+
+      // Emit toast notification for campaign start
+      _emitToastNotification(
+        "success",
+        "Campaign Dimulai",
+        `Campaign ${session.campaignName || sessionId} telah dimulai`,
+        sessionId
+      );
 
       // Start processing messages
       this.processMessages(sessionId, sock);
@@ -190,6 +252,17 @@ class BlastExecutionService {
 
             // Schedule auto-resume check
             this.scheduleBusinessHoursCheck(sessionId, businessHoursConfig);
+
+            // Emit UI update for auto-pause
+            _emitSessionsUpdate();
+
+            // Emit toast notification for auto-pause
+            _emitToastNotification(
+              "warning",
+              "Campaign Auto-Pause",
+              `Campaign ${sessionId} dijeda otomatis karena di luar jam kerja`,
+              sessionId
+            );
           }
 
           // Sleep for 1 minute and check again
@@ -210,6 +283,17 @@ class BlastExecutionService {
           await BlastSession.update(
             { status: "RUNNING", resumedAt: new Date() },
             { where: { sessionId } }
+          );
+
+          // Emit UI update for auto-resume
+          _emitSessionsUpdate();
+
+          // Emit toast notification for auto-resume
+          _emitToastNotification(
+            "success",
+            "Campaign Auto-Resume",
+            `Campaign ${sessionId} dilanjutkan otomatis karena sudah masuk jam kerja`,
+            sessionId
           );
         }
 
@@ -254,6 +338,15 @@ class BlastExecutionService {
 
           // Update session progress
           await this.updateSessionProgress(sessionId, executionState);
+
+          // Emit UI update every 5 messages or every 10 seconds
+          if (
+            executionState.processedCount % 5 === 0 ||
+            Date.now() - (executionState.lastUIUpdate || 0) > 10000
+          ) {
+            executionState.lastUIUpdate = Date.now();
+            _emitSessionsUpdate();
+          }
         } catch (messageError) {
           logger.error(
             `❌ Error processing message ${message.id}:`,
@@ -359,11 +452,40 @@ class BlastExecutionService {
           ? ((totalProcessed / session.totalMessages) * 100).toFixed(2)
           : 0;
 
+      // Update with current timestamp to show activity
       await session.update({
         currentIndex: executionState.currentIndex,
         sentCount: executionState.successCount,
         failedCount: executionState.failedCount,
         progressPercentage: parseFloat(progressPercentage),
+        updatedAt: new Date(), // Force update timestamp
+      });
+
+      // Log progress every 10 messages for debugging
+      if (executionState.processedCount % 10 === 0) {
+        logger.info(
+          `📊 Session ${sessionId} progress: ${totalProcessed}/${session.totalMessages} (${progressPercentage}%)`
+        );
+      }
+
+      // Emit toast for progress milestones (25%, 50%, 75%)
+      const milestones = [25, 50, 75];
+      const currentProgress = parseFloat(progressPercentage);
+
+      milestones.forEach((milestone) => {
+        const previousProgress = session.progressPercentage || 0;
+        if (previousProgress < milestone && currentProgress >= milestone) {
+          _emitToastNotification(
+            "info",
+            "Progress Update",
+            `Campaign ${
+              session.campaignName || sessionId
+            } telah mencapai ${milestone}% (${totalProcessed}/${
+              session.totalMessages
+            } pesan)`,
+            sessionId
+          );
+        }
       });
     } catch (error) {
       logger.error(
@@ -407,6 +529,17 @@ class BlastExecutionService {
 
       logger.info(`⏸️ Session ${sessionId} paused (database only)`);
 
+      // Emit UI update for pause
+      _emitSessionsUpdate();
+
+      // Emit toast notification for manual pause
+      _emitToastNotification(
+        "info",
+        "Campaign Dijeda",
+        `Campaign ${sessionId} telah dijeda secara manual`,
+        sessionId
+      );
+
       return {
         success: true,
         sessionId,
@@ -428,6 +561,17 @@ class BlastExecutionService {
     );
 
     logger.info(`⏸️ Execution paused for session ${sessionId}`);
+
+    // Emit UI update for pause
+    _emitSessionsUpdate();
+
+    // Emit toast notification for manual pause (in-memory)
+    _emitToastNotification(
+      "info",
+      "Campaign Dijeda",
+      `Campaign ${sessionId} telah dijeda`,
+      sessionId
+    );
 
     return {
       success: true,
@@ -466,6 +610,17 @@ class BlastExecutionService {
         resumedAt: new Date(),
       });
 
+      // Emit UI update for resume
+      _emitSessionsUpdate();
+
+      // Emit toast notification for resume (database-only)
+      _emitToastNotification(
+        "success",
+        "Campaign Dilanjutkan",
+        `Campaign ${sessionId} telah dilanjutkan`,
+        sessionId
+      );
+
       // Start execution (don't force start, let it check business hours normally)
       return this.startExecution(sessionId, false);
     }
@@ -484,6 +639,17 @@ class BlastExecutionService {
     );
 
     logger.info(`▶️ Execution resumed for session ${sessionId}`);
+
+    // Emit UI update for resume
+    _emitSessionsUpdate();
+
+    // Emit toast notification for manual resume
+    _emitToastNotification(
+      "success",
+      "Campaign Dilanjutkan",
+      `Campaign ${sessionId} telah dilanjutkan`,
+      sessionId
+    );
 
     return {
       success: true,
@@ -617,8 +783,23 @@ class BlastExecutionService {
 
       logger.info(`✅ Execution completed for session ${sessionId}`);
 
+      // Get session details for toast
+      const session = await BlastSession.findOne({ where: { sessionId } });
+
       // Emit final update
       _emitSessionsUpdate();
+
+      // Emit toast notification for completion
+      _emitToastNotification(
+        "success",
+        "Campaign Selesai",
+        `Campaign ${
+          session?.campaignName || sessionId
+        } telah selesai. Total terkirim: ${session?.sentCount || 0}, Gagal: ${
+          session?.failedCount || 0
+        }`,
+        sessionId
+      );
 
       return {
         success: true,
@@ -663,6 +844,14 @@ class BlastExecutionService {
 
       // Emit final update
       _emitSessionsUpdate();
+
+      // Emit toast notification for error
+      _emitToastNotification(
+        "error",
+        "Campaign Error",
+        `Campaign ${sessionId} mengalami error: ${error.message}`,
+        sessionId
+      );
     } catch (updateError) {
       logger.error(
         `❌ Failed to handle execution error for ${sessionId}:`,
@@ -699,6 +888,57 @@ class BlastExecutionService {
       failedCount: executionState.failedCount,
       currentIndex: executionState.currentIndex,
     };
+  }
+
+  /**
+   * Force UI update for all sessions
+   */
+  async forceUIUpdate() {
+    logger.info("🔄 Forcing UI update for all sessions");
+    await _emitSessionsUpdate();
+  }
+
+  /**
+   * Get comprehensive session status (database + in-memory)
+   * @param {string} sessionId - Session ID
+   * @returns {Promise<Object>} - Comprehensive status
+   */
+  async getComprehensiveStatus(sessionId) {
+    try {
+      const session = await BlastSession.findOne({ where: { sessionId } });
+      const executionState = this.runningExecutions.get(sessionId);
+
+      return {
+        database: session
+          ? {
+              status: session.status,
+              progressPercentage: session.progressPercentage,
+              sentCount: session.sentCount,
+              failedCount: session.failedCount,
+              totalMessages: session.totalMessages,
+              currentIndex: session.currentIndex,
+              updatedAt: session.updatedAt,
+            }
+          : null,
+        inMemory: executionState
+          ? {
+              status: executionState.status,
+              isPaused: executionState.isPaused,
+              isStopped: executionState.isStopped,
+              processedCount: executionState.processedCount,
+              successCount: executionState.successCount,
+              failedCount: executionState.failedCount,
+            }
+          : null,
+        hasTimer: this.businessHoursTimers.has(sessionId),
+      };
+    } catch (error) {
+      logger.error(
+        `❌ Failed to get comprehensive status for ${sessionId}:`,
+        error
+      );
+      return null;
+    }
   }
 
   /**
@@ -905,6 +1145,17 @@ class BlastExecutionService {
             `🚀 Auto-resuming session ${sessionId} - business hours started`
           );
           await this.resumeExecution(sessionId);
+
+          // Force UI update after auto-resume
+          setTimeout(_emitSessionsUpdate, 1000);
+
+          // Additional toast for scheduled auto-resume
+          _emitToastNotification(
+            "success",
+            "Campaign Auto-Resume",
+            `Campaign ${sessionId} telah dimulai otomatis sesuai jadwal jam kerja`,
+            sessionId
+          );
         } else {
           // Schedule next check
           this.scheduleBusinessHoursCheck(sessionId, businessHoursConfig);
@@ -919,46 +1170,6 @@ class BlastExecutionService {
     }, scheduleTime);
 
     this.businessHoursTimers.set(sessionId, timer);
-  }
-
-  /**
-   * Schedule business hours check for auto-resume
-   * @param {string} sessionId - Session ID
-   * @param {Object} businessHoursConfig - Business hours configuration
-   */
-  scheduleBusinessHoursCheck(sessionId, businessHoursConfig) {
-    const nextCheckTime = this.getNextBusinessHoursStart(businessHoursConfig);
-    const timeUntilNext = nextCheckTime.getTime() - Date.now();
-
-    // Don't schedule if it's more than 24 hours away
-    if (timeUntilNext > 24 * 60 * 60 * 1000) {
-      return;
-    }
-
-    logger.info(
-      `⏰ Scheduling auto-resume for session ${sessionId} at ${nextCheckTime.toLocaleString()}`
-    );
-
-    setTimeout(async () => {
-      try {
-        const session = await BlastSession.findOne({ where: { sessionId } });
-        if (!session || session.status !== "PAUSED") {
-          return; // Session no longer exists or not paused
-        }
-
-        if (this.isWithinBusinessHours(businessHoursConfig)) {
-          logger.info(
-            `🚀 Auto-resuming session ${sessionId} - business hours started`
-          );
-          await this.resumeExecution(sessionId);
-        } else {
-          // Schedule next check
-          this.scheduleBusinessHoursCheck(sessionId, businessHoursConfig);
-        }
-      } catch (error) {
-        logger.error(`❌ Failed to auto-resume session ${sessionId}:`, error);
-      }
-    }, timeUntilNext);
   }
 
   /**
