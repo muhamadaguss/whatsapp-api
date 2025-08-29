@@ -301,8 +301,23 @@ class BlastExecutionService {
         const messages = await messageQueueHandler.getNextBatch(sessionId, 1);
 
         if (messages.length === 0) {
-          // No more messages to process
-          logger.info(`✅ All messages processed for session ${sessionId}`);
+          // Check if there are any remaining messages (pending or processing)
+          const queueStats = await messageQueueHandler.getQueueStats(sessionId);
+
+          if (queueStats.remaining > 0) {
+            logger.info(
+              `⏳ Session ${sessionId} has ${queueStats.remaining} remaining messages (${queueStats.pending} pending, ${queueStats.processing} processing). Waiting...`
+            );
+
+            // Wait a bit and continue checking
+            await this.sleep(5000);
+            continue;
+          }
+
+          // No more messages to process and no remaining messages
+          logger.info(
+            `✅ All messages processed for session ${sessionId}. Final stats: ${queueStats.sent} sent, ${queueStats.failed} failed, ${queueStats.skipped} skipped`
+          );
           await this.completeExecution(sessionId);
           break;
         }
@@ -445,19 +460,24 @@ class BlastExecutionService {
       const session = await BlastSession.findOne({ where: { sessionId } });
       if (!session) return;
 
+      // Get actual queue statistics for more accurate progress calculation
+      const queueStats = await messageQueueHandler.getQueueStats(sessionId);
+
+      // Calculate progress based on actual queue data
       const totalProcessed =
-        executionState.successCount + executionState.failedCount;
+        queueStats.sent + queueStats.failed + queueStats.skipped;
       const progressPercentage =
-        session.totalMessages > 0
-          ? ((totalProcessed / session.totalMessages) * 100).toFixed(2)
+        queueStats.total > 0
+          ? Math.min(100, (totalProcessed / queueStats.total) * 100) // Cap at 100%
           : 0;
 
       // Update with current timestamp to show activity
       await session.update({
         currentIndex: executionState.currentIndex,
-        sentCount: executionState.successCount,
-        failedCount: executionState.failedCount,
-        progressPercentage: parseFloat(progressPercentage),
+        sentCount: queueStats.sent, // Use queue stats for accuracy
+        failedCount: queueStats.failed, // Use queue stats for accuracy
+        skippedCount: queueStats.skipped || 0, // Include skipped count
+        progressPercentage: parseFloat(progressPercentage.toFixed(2)),
         updatedAt: new Date(), // Force update timestamp
       });
 
@@ -763,11 +783,18 @@ class BlastExecutionService {
         );
       }
 
-      // Update session status in database
+      // Get final queue statistics
+      const queueStats = await messageQueueHandler.getQueueStats(sessionId);
+
+      // Update session status in database with final progress
       await BlastSession.update(
         {
           status: "COMPLETED",
           completedAt: new Date(),
+          progressPercentage: 100.0, // Force 100% on completion
+          sentCount: queueStats.sent,
+          failedCount: queueStats.failed,
+          skippedCount: queueStats.skipped || 0,
         },
         { where: { sessionId } }
       );
