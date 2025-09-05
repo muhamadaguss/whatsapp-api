@@ -8,12 +8,31 @@ const BlastMessage = require("../models/blastMessageModel");
 const { AppError } = require("../middleware/errorHandler");
 const blastExecutionService = require("../services/blastExecutionService"); // Import blastExecutionService
 
-const emitSessionUpdate = async () => {
+const emitSessionUpdate = async (userId = null) => {
   try {
-    const sessions = await BlastSession.findAll({
-      order: [["createdAt", "DESC"]],
-    });
-    getSocket().emit("sessions-update", sessions);
+    if (userId) {
+      // Emit to specific user only
+      const userSessions = await BlastSession.findAll({
+        where: { userId },
+        order: [["createdAt", "DESC"]],
+      });
+      getSocket().to(`user_${userId}`).emit("sessions-update", userSessions);
+    } else {
+      // Emit to all users with their respective sessions
+      const allUsers = await BlastSession.findAll({
+        attributes: ['userId'],
+        group: ['userId'],
+        raw: true
+      });
+      
+      for (const userObj of allUsers) {
+        const userSessions = await BlastSession.findAll({
+          where: { userId: userObj.userId },
+          order: [["createdAt", "DESC"]],
+        });
+        getSocket().to(`user_${userObj.userId}`).emit("sessions-update", userSessions);
+      }
+    }
   } catch (error) {
     logger.error("Failed to emit session update:", error);
   }
@@ -68,6 +87,9 @@ const createBlastSession = async (req, res) => {
       `✅ Blast session created by user ${req.user.id}: ${result.sessionId}`
     );
 
+    // Emit session update to user
+    await emitSessionUpdate(req.user.id);
+
     res.status(201).json({
       success: true,
       message: "Blast session created successfully",
@@ -116,7 +138,7 @@ const startBlastSession = async (req, res) => {
       !blastExecutionService.isWithinBusinessHours(businessHoursConfig)
     ) {
       logger.info(`Attempting to emit notification for session ${sessionId} due to business hours.`);
-      getSocket().emit("notification", {
+      getSocket().to(`user_${req.user.id}`).emit("notification", {
         type: "warning",
         message: `Blast session ${sessionId} will be paused until business hours (${businessHoursConfig.startHour}:00 - ${businessHoursConfig.endHour}:00).`,
       });
@@ -132,6 +154,9 @@ const startBlastSession = async (req, res) => {
     logger.info(
       `▶️ Blast session started by user ${req.user.id}: ${sessionId}`
     );
+
+    // Emit session update to user
+    await emitSessionUpdate(req.user.id);
 
     res.json({
       success: true,
@@ -168,6 +193,9 @@ const pauseBlastSession = async (req, res) => {
 
     logger.info(`⏸️ Blast session paused by user ${req.user.id}: ${sessionId}`);
 
+    // Emit session update to user
+    await emitSessionUpdate(req.user.id);
+
     res.json({
       success: true,
       message: "Blast session paused successfully",
@@ -202,6 +230,9 @@ const resumeBlastSession = async (req, res) => {
       `▶️ Blast session resumed by user ${req.user.id}: ${sessionId}`
     );
 
+    // Emit session update to user
+    await emitSessionUpdate(req.user.id);
+
     res.json({
       success: true,
       message: "Blast session resumed successfully",
@@ -235,6 +266,9 @@ const stopBlastSession = async (req, res) => {
     logger.info(
       `⏹️ Blast session stopped by user ${req.user.id}: ${sessionId}`
     );
+
+    // Emit session update to user
+    await emitSessionUpdate(req.user.id);
 
     res.json({
       success: true,
