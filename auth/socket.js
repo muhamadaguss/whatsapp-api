@@ -1,5 +1,6 @@
 // socket.js
 const { Server } = require("socket.io");
+const jwt = require("jsonwebtoken");
 const http = require("http");
 let io;
 
@@ -26,6 +27,36 @@ function initSocket(server) {
       allowEIO3: true, // Allow Engine.IO v3 clients
       pingTimeout: 60000,
       pingInterval: 25000,
+    });
+
+    // Socket authentication middleware
+    io.use((socket, next) => {
+      const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.replace('Bearer ', '');
+      
+      if (!token) {
+        return next(new Error('Authentication token required'));
+      }
+
+      try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        socket.userId = decoded.id;
+        socket.user = decoded;
+        next();
+      } catch (err) {
+        return next(new Error('Invalid authentication token'));
+      }
+    });
+
+    // Handle socket connections with user rooms
+    io.on('connection', (socket) => {
+      console.log(`User ${socket.userId} connected to socket: ${socket.id}`);
+      
+      // Join user-specific room
+      socket.join(`user_${socket.userId}`);
+      
+      socket.on('disconnect', () => {
+        console.log(`User ${socket.userId} disconnected from socket: ${socket.id}`);
+      });
     });
   }
   return io;
