@@ -236,9 +236,16 @@ const server = http.createServer(app); // Gunakan app di sini
 const io = initSocket(server);
 
 io.on("connection", (socket) => {
-  logger.info(`✅ A user connected via socket.io. ID: ${socket.id}`);
+  logger.info(`✅ User connected via socket.io. ID: ${socket.id}, User: ${socket.userId}`);
+  
+  // Join user to their specific room
+  if (socket.userId) {
+    socket.join(`user_${socket.userId}`);
+    logger.info(`👤 User ${socket.userId} joined room: user_${socket.userId}`);
+  }
+  
   socket.on("disconnect", () => {
-    logger.info(`❌ User disconnected: ${socket.id}`);
+    logger.info(`❌ User disconnected: ${socket.id} (User: ${socket.userId})`);
   });
 });
 

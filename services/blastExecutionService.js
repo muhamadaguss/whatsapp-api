@@ -7,18 +7,45 @@ const BlastSession = require("../models/blastSessionModel");
 const BlastMessage = require("../models/blastMessageModel");
 const SpinTextEngine = require("../utils/spinTextEngine");
 
-const _emitSessionsUpdate = async () => {
+const _emitSessionsUpdate = async (sessionId = null) => {
   try {
-    const sessions = await BlastSession.findAll({
-      order: [["createdAt", "DESC"]],
-    });
-
     const socket = getSocket();
-    if (socket) {
-      socket.emit("sessions-update", sessions);
-      logger.debug(`📡 Emitted sessions update: ${sessions.length} sessions`);
-    } else {
+    if (!socket) {
       logger.warn("⚠️ Socket not available for sessions update");
+      return;
+    }
+
+    if (sessionId) {
+      // Get userId from sessionId and emit to specific user only
+      const session = await BlastSession.findOne({
+        where: { sessionId },
+        attributes: ['userId']
+      });
+      
+      if (session) {
+        const userSessions = await BlastSession.findAll({
+          where: { userId: session.userId },
+          order: [["createdAt", "DESC"]],
+        });
+        socket.to(`user_${session.userId}`).emit("sessions-update", userSessions);
+        logger.debug(`📡 Emitted sessions update to user ${session.userId}: ${userSessions.length} sessions`);
+      }
+    } else {
+      // Emit to all users with their respective sessions
+      const allUsers = await BlastSession.findAll({
+        attributes: ['userId'],
+        group: ['userId'],
+        raw: true
+      });
+      
+      for (const userObj of allUsers) {
+        const userSessions = await BlastSession.findAll({
+          where: { userId: userObj.userId },
+          order: [["createdAt", "DESC"]],
+        });
+        socket.to(`user_${userObj.userId}`).emit("sessions-update", userSessions);
+      }
+      logger.debug(`📡 Emitted sessions update to all users: ${allUsers.length} users`);
     }
   } catch (error) {
     logger.error("❌ Failed to emit session update:", error);
@@ -110,7 +137,7 @@ class BlastExecutionService {
           );
 
           // Emit UI update for paused status
-          _emitSessionsUpdate();
+          _emitSessionsUpdate(sessionId);
 
           // Emit toast notification for auto-scheduling
           _emitToastNotification(
@@ -180,12 +207,12 @@ class BlastExecutionService {
       this.runningExecutions.set(sessionId, executionState);
 
       // Start periodic updates via socket
-      const updateInterval = setInterval(_emitSessionsUpdate, 2000); // Update every 2 seconds
+      const updateInterval = setInterval(() => _emitSessionsUpdate(sessionId), 2000); // Update every 2 seconds
 
       executionState.updateInterval = updateInterval;
 
       // Emit immediate UI update for running status
-      _emitSessionsUpdate();
+      _emitSessionsUpdate(sessionId);
 
       // Emit toast notification for campaign start
       _emitToastNotification(
@@ -254,7 +281,7 @@ class BlastExecutionService {
             this.scheduleBusinessHoursCheck(sessionId, businessHoursConfig);
 
             // Emit UI update for auto-pause
-            _emitSessionsUpdate();
+            _emitSessionsUpdate(sessionId);
 
             // Emit toast notification for auto-pause
             _emitToastNotification(
@@ -286,7 +313,7 @@ class BlastExecutionService {
           );
 
           // Emit UI update for auto-resume
-          _emitSessionsUpdate();
+          _emitSessionsUpdate(sessionId);
 
           // Emit toast notification for auto-resume
           _emitToastNotification(
@@ -360,7 +387,7 @@ class BlastExecutionService {
             Date.now() - (executionState.lastUIUpdate || 0) > 10000
           ) {
             executionState.lastUIUpdate = Date.now();
-            _emitSessionsUpdate();
+            _emitSessionsUpdate(sessionId);
           }
         } catch (messageError) {
           logger.error(
@@ -550,7 +577,7 @@ class BlastExecutionService {
       logger.info(`⏸️ Session ${sessionId} paused (database only)`);
 
       // Emit UI update for pause
-      _emitSessionsUpdate();
+      _emitSessionsUpdate(sessionId);
 
       // Emit toast notification for manual pause
       _emitToastNotification(
@@ -583,7 +610,7 @@ class BlastExecutionService {
     logger.info(`⏸️ Execution paused for session ${sessionId}`);
 
     // Emit UI update for pause
-    _emitSessionsUpdate();
+    _emitSessionsUpdate(sessionId);
 
     // Emit toast notification for manual pause (in-memory)
     _emitToastNotification(
@@ -631,7 +658,7 @@ class BlastExecutionService {
       });
 
       // Emit UI update for resume
-      _emitSessionsUpdate();
+      _emitSessionsUpdate(sessionId);
 
       // Emit toast notification for resume (database-only)
       _emitToastNotification(
@@ -661,7 +688,7 @@ class BlastExecutionService {
     logger.info(`▶️ Execution resumed for session ${sessionId}`);
 
     // Emit UI update for resume
-    _emitSessionsUpdate();
+    _emitSessionsUpdate(sessionId);
 
     // Emit toast notification for manual resume
     _emitToastNotification(
@@ -712,7 +739,7 @@ class BlastExecutionService {
       logger.info(`⏹️ Session ${sessionId} stopped (database only)`);
 
       // Emit update
-      _emitSessionsUpdate();
+      _emitSessionsUpdate(sessionId);
 
       return {
         success: true,
@@ -751,7 +778,7 @@ class BlastExecutionService {
     logger.info(`⏹️ Execution stopped for session ${sessionId}`);
 
     // Emit final update
-    _emitSessionsUpdate();
+    _emitSessionsUpdate(sessionId);
 
     return {
       success: true,
@@ -814,7 +841,7 @@ class BlastExecutionService {
       const session = await BlastSession.findOne({ where: { sessionId } });
 
       // Emit final update
-      _emitSessionsUpdate();
+      _emitSessionsUpdate(sessionId);
 
       // Emit toast notification for completion
       _emitToastNotification(
@@ -870,7 +897,7 @@ class BlastExecutionService {
       );
 
       // Emit final update
-      _emitSessionsUpdate();
+      _emitSessionsUpdate(sessionId);
 
       // Emit toast notification for error
       _emitToastNotification(
@@ -922,7 +949,7 @@ class BlastExecutionService {
    */
   async forceUIUpdate() {
     logger.info("🔄 Forcing UI update for all sessions");
-    await _emitSessionsUpdate();
+    _emitSessionsUpdate(sessionId);
   }
 
   /**
