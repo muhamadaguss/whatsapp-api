@@ -100,10 +100,20 @@ class MessageQueueHandler {
   async getNextBatch(sessionId, batchSize = 10) {
     try {
       // Get pending messages
+      logger.info(`🔍 Getting next batch of ${batchSize} messages for session ${sessionId}`);
+      
       const pendingMessages = await BlastMessage.findPendingBySession(
         sessionId,
         batchSize
       );
+      
+      logger.info(`📋 Found ${pendingMessages.length} pending messages for session ${sessionId}`);
+      
+      // Log phone numbers of pending messages for debugging
+      if (pendingMessages.length > 0) {
+        const phones = pendingMessages.map(m => m.phone).join(', ');
+        logger.info(`📱 Pending phone numbers: ${phones}`);
+      }
 
       // If not enough pending, get retryable failed messages
       let messages = pendingMessages;
@@ -112,6 +122,7 @@ class MessageQueueHandler {
           sessionId,
           batchSize - messages.length
         );
+        logger.info(`🔄 Found ${retryableMessages.length} retryable messages for session ${sessionId}`);
         messages = [...messages, ...retryableMessages];
       }
 

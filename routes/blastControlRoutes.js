@@ -18,6 +18,10 @@ router.post(
   asyncHandler(blastControlController.handleSessionAction)
 );
 router.post(
+  "/sessions/:sessionId/validate-phones",
+  asyncHandler(blastControlController.validateSessionPhones)
+);
+router.post(
   "/sessions",
   asyncHandler(blastControlController.createBlastSession)
 );
@@ -81,6 +85,98 @@ router.get("/health", asyncHandler(blastControlController.getSystemHealth));
 router.get(
   "/stats/:sessionId",
   asyncHandler(blastControlController.getSessionStats)
+);
+
+// =============================================================================
+// PHASE 3 - ADVANCED FEATURES ROUTES
+// =============================================================================
+
+// Analytics Routes
+router.get(
+  "/analytics/:sessionId", 
+  asyncHandler(blastControlController.getSessionAnalytics)
+);
+router.get(
+  "/analytics/dashboard/overview", 
+  asyncHandler(blastControlController.getDashboardAnalytics)
+);
+router.get(
+  "/analytics/:sessionId/export", 
+  asyncHandler(blastControlController.exportAnalytics)
+);
+
+// Phone Validation Routes
+router.post(
+  "/validation/phone/batch", 
+  asyncHandler(blastControlController.validatePhoneNumbers)
+);
+router.post(
+  "/validation/phone/single", 
+  asyncHandler(blastControlController.validateSinglePhone)
+);
+router.post(
+  "/validation/phone/export", 
+  asyncHandler(blastControlController.exportPhoneValidation)
+);
+
+// Auto Retry Configuration Routes
+router.post(
+  "/retry/:sessionId/configure", 
+  asyncHandler(blastControlController.configureAutoRetry)
+);
+router.post(
+  "/retry/:sessionId/disable", 
+  asyncHandler(blastControlController.disableAutoRetry)
+);
+router.get(
+  "/retry/:sessionId/status", 
+  asyncHandler(blastControlController.getAutoRetryStatus)
+);
+router.post(
+  "/retry/:sessionId/pause", 
+  asyncHandler(blastControlController.pauseAutoRetry)
+);
+router.post(
+  "/retry/:sessionId/resume", 
+  asyncHandler(blastControlController.resumeAutoRetry)
+);
+router.post(
+  "/retry/messages/force", 
+  asyncHandler(blastControlController.forceRetryMessages)
+);
+router.get(
+  "/retry/service/status", 
+  asyncHandler(blastControlController.getAutoRetryServiceStatus)
+);
+
+// Bulk Operations Routes
+router.post(
+  "/bulk/retry", 
+  asyncHandler(blastControlController.bulkRetryFailedMessages)
+);
+router.post(
+  "/bulk/messages/status", 
+  asyncHandler(blastControlController.bulkUpdateMessageStatus)
+);
+router.post(
+  "/bulk/messages/delete", 
+  asyncHandler(blastControlController.bulkDeleteMessages)
+);
+router.post(
+  "/bulk/validation/phone", 
+  asyncHandler(blastControlController.bulkValidatePhoneNumbers)
+);
+router.post(
+  "/bulk/campaigns/control", 
+  asyncHandler(blastControlController.bulkCampaignControl)
+);
+router.post(
+  "/bulk/campaigns/export", 
+  asyncHandler(blastControlController.bulkExportCampaignData)
+);
+router.post(
+  "/bulk/campaigns/cleanup", 
+  asyncHandler(blastControlController.bulkCleanupCampaigns)
 );
 
 module.exports = router;

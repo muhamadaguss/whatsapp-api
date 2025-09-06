@@ -352,6 +352,24 @@ class BlastExecutionService {
         const message = messages[0];
 
         try {
+          // 📱 DEFENSIVE VALIDATION: Double-check phone number before sending
+          logger.info(`🔍 Double-checking phone number availability: ${message.phone}`);
+          
+          try {
+            const phoneCheck = await sock.onWhatsApp(message.phone);
+            if (!phoneCheck || !phoneCheck[0]?.exists) {
+              logger.warn(`❌ Phone ${message.phone} is not available on WhatsApp - marking as failed`);
+              await messageQueueHandler.markAsFailed(message.id, "Phone number not available on WhatsApp");
+              executionState.failedCount++;
+              executionState.processedCount++;
+              continue;
+            }
+            logger.info(`✅ Phone ${message.phone} confirmed available on WhatsApp`);
+          } catch (phoneCheckError) {
+            logger.warn(`⚠️ Phone validation error for ${message.phone}:`, phoneCheckError.message);
+            // Continue with sending if validation fails due to technical error
+          }
+
           // Mark as processing
           await messageQueueHandler.markAsProcessing(message.id);
 
