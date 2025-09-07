@@ -278,11 +278,21 @@ async function initializeDatabase() {
     require("./models/blastSessionModel");
     require("./models/blastMessageModel");
 
-    // Skip associations setup for now to avoid conflicts
-    // Associations can be added later when needed
-    logger.info("⚠️ Skipping associations setup to avoid conflicts");
+    // Setup model associations
+    logger.info("🔗 Setting up model associations...");
+    
+    // Get all models from sequelize
+    const models = sequelize.models;
+    
+    // Setup associations for models that have associate function
+    Object.keys(models).forEach(modelName => {
+      if (models[modelName].associate) {
+        models[modelName].associate(models);
+        logger.info(`✅ Associations set up for ${modelName}`);
+      }
+    });
 
-    logger.info("✅ All models loaded successfully");
+    logger.info("✅ All models and associations loaded successfully");
 
     // Sync database models
     await sequelize.sync({ alter: true });

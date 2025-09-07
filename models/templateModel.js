@@ -32,6 +32,9 @@ const Template = sequelize.define(
   }
 );
 
-Template.belongsTo(User, { foreignKey: "userId", as: "user" });
+// Association function for relationships
+Template.associate = function(models) {
+  Template.belongsTo(models.User, { foreignKey: "userId", as: "user" });
+};
 
 module.exports = Template;

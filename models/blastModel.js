@@ -28,6 +28,9 @@ const Blast = sequelize.define(
   }
 );
 
-Blast.belongsTo(User, { foreignKey: "userId", as: "user" });
+// Association function for relationships
+Blast.associate = function(models) {
+  Blast.belongsTo(models.User, { foreignKey: "userId", as: "user" });
+};
 
 module.exports = Blast;

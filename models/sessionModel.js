@@ -16,6 +16,14 @@ const Session = sequelize.define(
       },
     },
     phoneNumber: { type: DataTypes.STRING },
+    displayName: { type: DataTypes.STRING, allowNull: true },
+    profilePicture: { type: DataTypes.TEXT, allowNull: true },
+    lastSeen: { type: DataTypes.DATE, allowNull: true },
+    connectionQuality: { 
+      type: DataTypes.ENUM('excellent', 'good', 'poor', 'unknown'), 
+      defaultValue: 'unknown' 
+    },
+    metadata: { type: DataTypes.JSONB, allowNull: true },
   },
   {
     timestamps: true,
@@ -23,6 +31,17 @@ const Session = sequelize.define(
   }
 );
 
-Session.belongsTo(User, { foreignKey: "userId", as: "user" });
+// Association function for relationships
+Session.associate = function(models) {
+  // Relationship with User
+  Session.belongsTo(models.User, { foreignKey: "userId", as: "user" });
+  
+  // Relationship with BlastSession
+  Session.hasMany(models.BlastSession, {
+    foreignKey: 'whatsappSessionId',
+    sourceKey: 'sessionId',
+    as: 'blastSessions'
+  });
+};
 
 module.exports = Session;

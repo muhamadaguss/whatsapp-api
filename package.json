@@ -6,7 +6,9 @@
   "scripts": {
     "test": "echo \"No tests yet\"",
     "start": "node index.js",
-    "migrate:image": "node run-image-migration.js"
+    "migrate:image": "node run-image-migration.js",
+    "migrate:whatsapp-session": "node migrations/run-whatsapp-session-migration.js",
+    "migrate:whatsapp-session:rollback": "node migrations/run-whatsapp-session-migration.js rollback"
   },
   "keywords": [],
   "author": "",

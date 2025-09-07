@@ -7,6 +7,10 @@ const MessageStatusModel = require("../models/messageStatusModel");
 const { getSocket } = require("../auth/socket");
 const Boom = require("@hapi/boom");
 const SpinTextEngine = require("../utils/spinTextEngine");
+const BlastRealTimeService = require("./blastRealTimeService");
+
+// Create singleton instance
+const blastRealTimeService = new BlastRealTimeService(); // Import real-time service
 
 function randomDelay(min = 60, max = 120) {
   return Math.floor(Math.random() * (max - min + 1) + min) * 1000;
@@ -96,17 +100,50 @@ async function processExcelAndSendMessages(
     }
 
     function emitSocket() {
+      // Calculate accurate progress percentage
+      const processedCount = resultsSocket.success + resultsSocket.failed;
       resultsSocket.progress = Math.min(
         100,
-        Math.round(
-          ((resultsSocket.success + resultsSocket.failed) /
-            resultsSocket.total) *
-            100
-        )
+        Math.round((processedCount / resultsSocket.total) * 100)
       );
+      
+      // Enhanced real-time emission using blastRealTimeService
+      if (campaignId) {
+        try {
+          // Create session-like object for progress calculation
+          const sessionData = {
+            sessionId: campaignId,
+            totalMessages: resultsSocket.total,
+            sentCount: resultsSocket.success,
+            failedCount: resultsSocket.failed,
+            skippedCount: 0,
+            status: resultsSocket.status || "PROCESSING"
+          };
+
+          // Emit real-time progress update
+          blastRealTimeService.emitSessionProgress(campaignId, {
+            processedCount,
+            totalMessages: resultsSocket.total,
+            sentCount: resultsSocket.success,
+            failedCount: resultsSocket.failed,
+            progressPercentage: resultsSocket.progress,
+            reason: 'Real-time blast progress update'
+          });
+
+          logger.info(
+            `📡 Enhanced emit status: ${resultsSocket.progress}% | Processed: ${processedCount}/${resultsSocket.total} | Success: ${resultsSocket.success} | Failed: ${resultsSocket.failed}`
+          );
+        } catch (emitError) {
+          logger.warn(`⚠️ Failed to emit enhanced progress, falling back to legacy:`, emitError.message);
+        }
+      }
+      
+      // Legacy socket emission for backward compatibility
       io?.emit("blast-status", resultsSocket);
+      
+      // Also log for debugging
       logger.info(
-        `📡 Emit status: ${resultsSocket.progress}% | Success: ${resultsSocket.success} | Failed: ${resultsSocket.failed}`
+        `📡 Legacy emit status: ${resultsSocket.progress}% | Processed: ${processedCount}/${resultsSocket.total} | Success: ${resultsSocket.success} | Failed: ${resultsSocket.failed}`
       );
     }
 
@@ -148,6 +185,26 @@ async function processExcelAndSendMessages(
           reason: "Missing phone/message",
         });
         resultsSocket.failed++;
+        
+        // Emit real-time failed notification
+        if (campaignId) {
+          try {
+            await blastRealTimeService.emitFailedMessage(campaignId, {
+              messageIndex: i,
+              phoneNumber: phone,
+              contactName: row?.name || row?.nama || null,
+              errorType: "validation_error",
+              errorMessage: "Missing phone number or message content",
+              errorCode: "MISSING_DATA",
+              retryCount: 0,
+              maxRetries: 0, // No retry for validation errors
+              failedAt: new Date().toISOString()
+            });
+          } catch (emitError) {
+            logger.warn(`⚠️ Failed to emit failed notification: ${emitError.message}`);
+          }
+        }
+        
         emitSocket();
         continue;
       }
@@ -166,6 +223,26 @@ async function processExcelAndSendMessages(
             reason: "Nomor tidak aktif di WhatsApp",
           });
           resultsSocket.failed++;
+          
+          // Emit real-time failed notification for inactive number
+          if (campaignId) {
+            try {
+              await blastRealTimeService.emitFailedMessage(campaignId, {
+                messageIndex: i,
+                phoneNumber: phone,
+                contactName: row?.name || row?.nama || null,
+                errorType: "inactive_number",
+                errorMessage: "Phone number is not active on WhatsApp",
+                errorCode: "INACTIVE_NUMBER",
+                retryCount: 0,
+                maxRetries: 0, // No retry for inactive numbers
+                failedAt: new Date().toISOString()
+              });
+            } catch (emitError) {
+              logger.warn(`⚠️ Failed to emit failed notification: ${emitError.message}`);
+            }
+          }
+          
           emitSocket();
           continue;
         }
@@ -203,6 +280,24 @@ async function processExcelAndSendMessages(
 
         results.push({ phone, status: "success", messageId: sentMsg.key.id });
         resultsSocket.success++;
+        
+        // Emit real-time success notification if sessionId is available for blast campaigns
+        if (campaignId) {
+          try {
+            await blastRealTimeService.emitSuccessMessage(campaignId, {
+              messageIndex: i,
+              phoneNumber: phone,
+              contactName: row?.name || row?.nama || null,
+              whatsappMessageId: sentMsg.key.id,
+              sentAt: new Date().toISOString()
+            });
+          } catch (emitError) {
+            logger.warn(`⚠️ Failed to emit success notification: ${emitError.message}`);
+          }
+        }
+
+        // Emit progress update after success
+        emitSocket();
       } catch (err) {
         const isSessionError =
           /not connected|disconnected|logout|terminated|conn|closed/i.test(
@@ -213,7 +308,14 @@ async function processExcelAndSendMessages(
 
         logger.error(`❌ Gagal kirim ke ${phone}: ${err.message}`);
 
+        // Determine error type for better categorization
+        let errorType = "unknown_error";
+        let errorCode = "UNKNOWN_ERROR";
+        let canRetry = true;
+
         if (isTimeoutError) {
+          errorType = "timeout_error";
+          errorCode = "TIMEOUT";
           logger.warn(`⚠️ Timeout saat proses nomor ${phone}, akan di-skip`);
           results.push({
             phone,
@@ -221,12 +323,64 @@ async function processExcelAndSendMessages(
             reason: "Timeout saat verifikasi nomor",
           });
           resultsSocket.failed++;
+          
+          // Emit timeout error notification
+          if (campaignId) {
+            try {
+              await blastRealTimeService.emitFailedMessage(campaignId, {
+                messageIndex: i,
+                phoneNumber: phone,
+                contactName: row?.name || row?.nama || null,
+                errorType,
+                errorMessage: "Timeout during number verification",
+                errorCode,
+                retryCount: 0,
+                maxRetries: 3,
+                failedAt: new Date().toISOString()
+              });
+            } catch (emitError) {
+              logger.warn(`⚠️ Failed to emit timeout notification: ${emitError.message}`);
+            }
+          }
+          
           emitSocket();
           continue; // skip dan lanjut ke nomor berikutnya
         }
 
+        if (isSessionError) {
+          errorType = "session_error";
+          errorCode = "SESSION_DISCONNECTED";
+          canRetry = false;
+        } else if (err.message.includes("rate") || err.message.includes("limit")) {
+          errorType = "rate_limit";
+          errorCode = "RATE_LIMITED";
+        } else if (err.message.includes("blocked") || err.message.includes("spam")) {
+          errorType = "blocked_number";
+          errorCode = "NUMBER_BLOCKED";
+          canRetry = false;
+        }
+
         results.push({ phone, status: "error", reason: err.message });
         resultsSocket.failed++;
+
+        // Emit detailed failed message notification
+        if (campaignId) {
+          try {
+            await blastRealTimeService.emitFailedMessage(campaignId, {
+              messageIndex: i,
+              phoneNumber: phone,
+              contactName: row?.name || row?.nama || null,
+              errorType,
+              errorMessage: err.message,
+              errorCode,
+              retryCount: 0,
+              maxRetries: canRetry ? 3 : 0,
+              failedAt: new Date().toISOString()
+            });
+          } catch (emitError) {
+            logger.warn(`⚠️ Failed to emit error notification: ${emitError.message}`);
+          }
+        }
 
         if (isSessionError) {
           // Hitung sisa nomor yang belum diproses

@@ -1,13 +1,14 @@
 /**
  * Blast Model Associations Setup
- * Only defines relationships for blast session models to avoid conflicts
+ * Defines relationships for blast session models and WhatsApp sessions
  */
 
 const BlastSession = require("./blastSessionModel");
 const BlastMessage = require("./blastMessageModel");
+const Session = require("./sessionModel");
 
 /**
- * Setup blast model associations only
+ * Setup blast model associations
  */
 function setupBlastAssociations() {
   try {
@@ -23,6 +24,20 @@ function setupBlastAssociations() {
       foreignKey: "sessionId",
       targetKey: "sessionId",
       as: "blastSession",
+    });
+
+    // BlastSession to Session (WhatsApp) relationship
+    BlastSession.belongsTo(Session, {
+      foreignKey: 'whatsappSessionId',
+      targetKey: 'sessionId',
+      as: 'whatsappSession'
+    });
+
+    // Session to BlastSession relationship (optional, for reverse queries)
+    Session.hasMany(BlastSession, {
+      foreignKey: 'whatsappSessionId',
+      sourceKey: 'sessionId',
+      as: 'blastSessions'
     });
 
     console.log("✅ Blast model associations setup completed");

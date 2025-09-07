@@ -6,49 +6,161 @@ const messageQueueHandler = require("../utils/messageQueueHandler");
 const BlastSession = require("../models/blastSessionModel");
 const BlastMessage = require("../models/blastMessageModel");
 const SpinTextEngine = require("../utils/spinTextEngine");
+const BlastRealTimeService = require("./blastRealTimeService");
+
+// Create singleton instance
+const blastRealTimeService = new BlastRealTimeService(); // Import real-time service
 
 const _emitSessionsUpdate = async (sessionId = null) => {
   try {
-    const socket = getSocket();
-    if (!socket) {
-      logger.warn("⚠️ Socket not available for sessions update");
-      return;
-    }
-
+    // Use enhanced real-time service for better session updates
     if (sessionId) {
-      // Get userId from sessionId and emit to specific user only
+      // Get userId from sessionId for targeted emission
       const session = await BlastSession.findOne({
         where: { sessionId },
         attributes: ['userId']
       });
       
       if (session) {
-        const userSessions = await BlastSession.findAll({
-          where: { userId: session.userId },
-          order: [["createdAt", "DESC"]],
-        });
-        socket.to(`user_${session.userId}`).emit("sessions-update", userSessions);
-        logger.debug(`📡 Emitted sessions update to user ${session.userId}: ${userSessions.length} sessions`);
+        await blastRealTimeService.emitSessionsUpdate(session.userId);
+        logger.debug(`📡 Emitted sessions update via real-time service to user ${session.userId}`);
       }
     } else {
-      // Emit to all users with their respective sessions
-      const allUsers = await BlastSession.findAll({
-        attributes: ['userId'],
-        group: ['userId'],
-        raw: true
-      });
-      
-      for (const userObj of allUsers) {
-        const userSessions = await BlastSession.findAll({
-          where: { userId: userObj.userId },
-          order: [["createdAt", "DESC"]],
-        });
-        socket.to(`user_${userObj.userId}`).emit("sessions-update", userSessions);
-      }
-      logger.debug(`📡 Emitted sessions update to all users: ${allUsers.length} users`);
+      await blastRealTimeService.emitSessionsUpdate();
+      logger.debug(`📡 Emitted sessions update via real-time service to all users`);
     }
   } catch (error) {
-    logger.error("❌ Failed to emit session update:", error);
+    logger.error("❌ Failed to emit session update via real-time service:", error);
+    
+    // Fallback to original implementation
+    try {
+      const socket = getSocket();
+      if (!socket) {
+        logger.warn("⚠️ Socket not available for sessions update fallback");
+        return;
+      }
+
+      if (sessionId) {
+        const session = await BlastSession.findOne({
+          where: { sessionId },
+          attributes: ['userId']
+        });
+        
+        if (session) {
+          const userSessions = await BlastSession.findAll({
+            where: { userId: session.userId },
+            include: [
+              {
+                model: require("../models/sessionModel"),
+                as: "whatsappSession",
+                attributes: ["sessionId", "phoneNumber", "displayName", "status", "connectionQuality"]
+              }
+            ],
+            order: [["createdAt", "DESC"]],
+          });
+
+          // Transform whatsappSession to whatsappAccount for frontend compatibility
+          const transformedSessions = userSessions.map(session => {
+            const sessionData = session.toJSON();
+            
+            // Transform whatsappSession to whatsappAccount
+            if (sessionData.whatsappSession) {
+              sessionData.whatsappAccount = {
+                sessionId: sessionData.whatsappSession.sessionId,
+                phoneNumber: sessionData.whatsappSession.phoneNumber,
+                displayName: sessionData.whatsappSession.displayName || `Account ${sessionData.whatsappSession.phoneNumber}`,
+                status: sessionData.whatsappSession.status,
+                profilePicture: sessionData.whatsappSession.profilePicture,
+                lastSeen: sessionData.whatsappSession.lastSeen,
+                connectionQuality: sessionData.whatsappSession.connectionQuality || 'unknown',
+                operatorInfo: sessionData.whatsappSession.metadata?.operatorInfo || null
+              };
+            } else {
+              // Fallback untuk missing WhatsApp session data
+              sessionData.whatsappAccount = {
+                sessionId: sessionData.whatsappSessionId,
+                phoneNumber: null,
+                displayName: 'Account Information Unavailable',
+                status: 'unknown',
+                profilePicture: null,
+                lastSeen: null,
+                connectionQuality: 'unknown',
+                operatorInfo: null
+              };
+            }
+
+            // Remove the nested whatsappSession object
+            delete sessionData.whatsappSession;
+            
+            return sessionData;
+          });
+
+          socket.to(`user_${session.userId}`).emit("sessions-update", transformedSessions);
+          logger.debug(`📡 Fallback: Emitted sessions update to user ${session.userId}: ${transformedSessions.length} sessions`);
+        }
+      } else {
+        const allUsers = await BlastSession.findAll({
+          attributes: ['userId'],
+          group: ['userId'],
+          raw: true
+        });
+        
+        for (const userObj of allUsers) {
+          const userSessions = await BlastSession.findAll({
+            where: { userId: userObj.userId },
+            include: [
+              {
+                model: require("../models/sessionModel"),
+                as: "whatsappSession",
+                attributes: ["sessionId", "phoneNumber", "displayName", "status", "connectionQuality"]
+              }
+            ],
+            order: [["createdAt", "DESC"]],
+          });
+
+          // Transform whatsappSession to whatsappAccount for frontend compatibility
+          const transformedSessions = userSessions.map(session => {
+            const sessionData = session.toJSON();
+            
+            // Transform whatsappSession to whatsappAccount
+            if (sessionData.whatsappSession) {
+              sessionData.whatsappAccount = {
+                sessionId: sessionData.whatsappSession.sessionId,
+                phoneNumber: sessionData.whatsappSession.phoneNumber,
+                displayName: sessionData.whatsappSession.displayName || `Account ${sessionData.whatsappSession.phoneNumber}`,
+                status: sessionData.whatsappSession.status,
+                profilePicture: sessionData.whatsappSession.profilePicture,
+                lastSeen: sessionData.whatsappSession.lastSeen,
+                connectionQuality: sessionData.whatsappSession.connectionQuality || 'unknown',
+                operatorInfo: sessionData.whatsappSession.metadata?.operatorInfo || null
+              };
+            } else {
+              // Fallback untuk missing WhatsApp session data
+              sessionData.whatsappAccount = {
+                sessionId: sessionData.whatsappSessionId,
+                phoneNumber: null,
+                displayName: 'Account Information Unavailable',
+                status: 'unknown',
+                profilePicture: null,
+                lastSeen: null,
+                connectionQuality: 'unknown',
+                operatorInfo: null
+              };
+            }
+
+            // Remove the nested whatsappSession object
+            delete sessionData.whatsappSession;
+            
+            return sessionData;
+          });
+
+          socket.to(`user_${userObj.userId}`).emit("sessions-update", transformedSessions);
+        }
+        logger.debug(`📡 Fallback: Emitted sessions update to all users: ${allUsers.length} users`);
+      }
+    } catch (fallbackError) {
+      logger.error("❌ Fallback session update also failed:", fallbackError);
+    }
   }
 };
 
@@ -58,24 +170,40 @@ const _emitSessionsUpdate = async (sessionId = null) => {
  * @param {string} title - Toast title
  * @param {string} description - Toast description
  * @param {string} sessionId - Session ID (optional)
+ * @param {number} userId - User ID (optional)
  */
-const _emitToastNotification = (type, title, description, sessionId = null) => {
+const _emitToastNotification = (type, title, description, sessionId = null, userId = null) => {
   try {
-    const socket = getSocket();
-    if (socket) {
-      socket.emit("toast-notification", {
-        type,
-        title,
-        description,
-        sessionId,
-        timestamp: new Date().toISOString(),
-      });
-      logger.debug(`🍞 Emitted toast: ${type} - ${title}`);
-    } else {
-      logger.warn("⚠️ Socket not available for toast notification");
-    }
+    // Use enhanced real-time service for toast notifications
+    blastRealTimeService.emitToastNotification(type, title, description, userId, sessionId);
   } catch (error) {
-    logger.error("❌ Failed to emit toast notification:", error);
+    logger.error("❌ Failed to emit toast notification via real-time service:", error);
+    
+    // Fallback to original implementation
+    try {
+      const socket = getSocket();
+      if (socket) {
+        const toastData = {
+          type,
+          title,
+          description,
+          sessionId,
+          timestamp: new Date().toISOString(),
+        };
+        
+        if (userId) {
+          socket.to(`user_${userId}`).emit("toast-notification", toastData);
+        } else {
+          socket.emit("toast-notification", toastData);
+        }
+        
+        logger.debug(`🍞 Fallback: Emitted toast: ${type} - ${title}`);
+      } else {
+        logger.warn("⚠️ Socket not available for toast notification fallback");
+      }
+    } catch (fallbackError) {
+      logger.error("❌ Fallback toast notification also failed:", fallbackError);
+    }
   }
 };
 

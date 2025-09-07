@@ -8,6 +8,10 @@ const BlastSession = require("../models/blastSessionModel");
 const BlastMessage = require("../models/blastMessageModel");
 const { AppError } = require("../middleware/errorHandler");
 const blastExecutionService = require("../services/blastExecutionService"); // Import blastExecutionService
+const BlastRealTimeService = require("../services/blastRealTimeService");
+
+// Create singleton instance
+const blastRealTimeService = new BlastRealTimeService(); // Import real-time service
 
 // Phase 3 Services
 const AnalyticsService = require("../services/analyticsService");
@@ -206,20 +210,24 @@ const markInvalidNumbersAsFailed = async (sessionId, validationDetails) => {
       }
     );
 
-    // Recalculate progress
+    // Recalculate progress using the real-time service for consistency
     const session = await BlastSession.findOne({
       where: { sessionId: sessionId }
     });
 
     if (session) {
-      const progressPercentage = session.totalMessages > 0 
-        ? ((session.sentCount + session.failedCount + session.skippedCount) / session.totalMessages) * 100 
-        : 0;
+      const progressPercentage = blastRealTimeService.calculateProgressPercentage(session);
 
       await BlastSession.update(
-        { progressPercentage: Math.min(progressPercentage, 100) },
+        { progressPercentage },
         { where: { sessionId: sessionId } }
       );
+
+      // Emit real-time progress update
+      await blastRealTimeService.emitSessionProgress(sessionId, {
+        invalidNumbersMarked: invalidNumbers.length,
+        reason: 'Invalid phone numbers marked as failed'
+      });
     }
 
     logger.info(`📱 Marked ${invalidNumbers.length} invalid numbers as failed for session ${sessionId}`);
@@ -232,31 +240,125 @@ const markInvalidNumbersAsFailed = async (sessionId, validationDetails) => {
 
 const emitSessionUpdate = async (userId = null) => {
   try {
-    if (userId) {
-      // Emit to specific user only
-      const userSessions = await BlastSession.findAll({
-        where: { userId },
-        order: [["createdAt", "DESC"]],
-      });
-      getSocket().to(`user_${userId}`).emit("sessions-update", userSessions);
-    } else {
-      // Emit to all users with their respective sessions
-      const allUsers = await BlastSession.findAll({
-        attributes: ['userId'],
-        group: ['userId'],
-        raw: true
-      });
-      
-      for (const userObj of allUsers) {
+    // Use the enhanced real-time service for session updates
+    await blastRealTimeService.emitSessionsUpdate(userId);
+    logger.debug(`📡 Emitted sessions update via real-time service${userId ? ` for user ${userId}` : ' for all users'}`);
+  } catch (error) {
+    logger.error("❌ Failed to emit session update via real-time service:", error);
+    // Fallback to original implementation if needed
+    try {
+      if (userId) {
         const userSessions = await BlastSession.findAll({
-          where: { userId: userObj.userId },
+          where: { userId },
+          include: [
+            {
+              model: require("../models/sessionModel"),
+              as: "whatsappSession",
+              attributes: ["sessionId", "phoneNumber", "displayName", "status"]
+            }
+          ],
           order: [["createdAt", "DESC"]],
         });
-        getSocket().to(`user_${userObj.userId}`).emit("sessions-update", userSessions);
+
+        // Transform whatsappSession to whatsappAccount for frontend compatibility
+        const transformedSessions = userSessions.map(session => {
+          const sessionData = session.toJSON();
+          
+          // Transform whatsappSession to whatsappAccount
+          if (sessionData.whatsappSession) {
+            sessionData.whatsappAccount = {
+              sessionId: sessionData.whatsappSession.sessionId,
+              phoneNumber: sessionData.whatsappSession.phoneNumber,
+              displayName: sessionData.whatsappSession.displayName || `Account ${sessionData.whatsappSession.phoneNumber}`,
+              status: sessionData.whatsappSession.status,
+              profilePicture: sessionData.whatsappSession.profilePicture,
+              lastSeen: sessionData.whatsappSession.lastSeen,
+              connectionQuality: sessionData.whatsappSession.connectionQuality || 'unknown',
+              operatorInfo: sessionData.whatsappSession.metadata?.operatorInfo || null
+            };
+          } else {
+            // Fallback untuk missing WhatsApp session data
+            sessionData.whatsappAccount = {
+              sessionId: sessionData.whatsappSessionId,
+              phoneNumber: null,
+              displayName: 'Account Information Unavailable',
+              status: 'unknown',
+              profilePicture: null,
+              lastSeen: null,
+              connectionQuality: 'unknown',
+              operatorInfo: null
+            };
+          }
+
+          // Remove the nested whatsappSession object
+          delete sessionData.whatsappSession;
+          
+          return sessionData;
+        });
+
+        getSocket().to(`user_${userId}`).emit("sessions-update", transformedSessions);
+      } else {
+        const allUsers = await BlastSession.findAll({
+          attributes: ['userId'],
+          group: ['userId'],
+          raw: true
+        });
+        
+        for (const userObj of allUsers) {
+          const userSessions = await BlastSession.findAll({
+            where: { userId: userObj.userId },
+            include: [
+              {
+                model: require("../models/sessionModel"),
+                as: "whatsappSession",
+                attributes: ["sessionId", "phoneNumber", "displayName", "status"]
+              }
+            ],
+            order: [["createdAt", "DESC"]],
+          });
+
+          // Transform whatsappSession to whatsappAccount for frontend compatibility
+          const transformedSessions = userSessions.map(session => {
+            const sessionData = session.toJSON();
+            
+            // Transform whatsappSession to whatsappAccount
+            if (sessionData.whatsappSession) {
+              sessionData.whatsappAccount = {
+                sessionId: sessionData.whatsappSession.sessionId,
+                phoneNumber: sessionData.whatsappSession.phoneNumber,
+                displayName: sessionData.whatsappSession.displayName || `Account ${sessionData.whatsappSession.phoneNumber}`,
+                status: sessionData.whatsappSession.status,
+                profilePicture: sessionData.whatsappSession.profilePicture,
+                lastSeen: sessionData.whatsappSession.lastSeen,
+                connectionQuality: sessionData.whatsappSession.connectionQuality || 'unknown',
+                operatorInfo: sessionData.whatsappSession.metadata?.operatorInfo || null
+              };
+            } else {
+              // Fallback untuk missing WhatsApp session data
+              sessionData.whatsappAccount = {
+                sessionId: sessionData.whatsappSessionId,
+                phoneNumber: null,
+                displayName: 'Account Information Unavailable',
+                status: 'unknown',
+                profilePicture: null,
+                lastSeen: null,
+                connectionQuality: 'unknown',
+                operatorInfo: null
+              };
+            }
+
+            // Remove the nested whatsappSession object
+            delete sessionData.whatsappSession;
+            
+            return sessionData;
+          });
+
+          getSocket().to(`user_${userObj.userId}`).emit("sessions-update", transformedSessions);
+        }
       }
+    } catch (fallbackError) {
+      logger.error("❌ Fallback session update also failed:", fallbackError);
     }
-  } catch (error) {
-    logger.error("Failed to emit session update:", error);
   }
 };
 
@@ -667,17 +769,71 @@ const getUserBlastSessions = async (req, res) => {
       whereClause.status = status;
     }
 
+    // Import Session model untuk include
+    const Session = require("../models/sessionModel");
+
     const { count, rows: sessions } = await BlastSession.findAndCountAll({
       where: whereClause,
+      include: [{
+        model: Session,
+        as: 'whatsappSession',
+        attributes: [
+          'sessionId', 
+          'phoneNumber', 
+          'displayName', 
+          'status', 
+          'profilePicture',
+          'lastSeen',
+          'connectionQuality',
+          'metadata'
+        ],
+        required: false // LEFT JOIN untuk handle missing WhatsApp sessions
+      }],
       order: [["createdAt", "DESC"]],
       limit: parseInt(limit),
       offset: parseInt(offset),
     });
 
+    // Transform data untuk include WhatsApp account information
+    const transformedSessions = sessions.map(session => {
+      const sessionData = session.toJSON();
+      
+      // Extract WhatsApp account information
+      if (sessionData.whatsappSession) {
+        sessionData.whatsappAccount = {
+          sessionId: sessionData.whatsappSession.sessionId,
+          phoneNumber: sessionData.whatsappSession.phoneNumber,
+          displayName: sessionData.whatsappSession.displayName || `Account ${sessionData.whatsappSession.phoneNumber}`,
+          status: sessionData.whatsappSession.status,
+          profilePicture: sessionData.whatsappSession.profilePicture,
+          lastSeen: sessionData.whatsappSession.lastSeen,
+          connectionQuality: sessionData.whatsappSession.connectionQuality || 'unknown',
+          operatorInfo: sessionData.whatsappSession.metadata?.operatorInfo || null
+        };
+      } else {
+        // Fallback untuk missing WhatsApp session data
+        sessionData.whatsappAccount = {
+          sessionId: sessionData.whatsappSessionId,
+          phoneNumber: null,
+          displayName: 'Account Information Unavailable',
+          status: 'unknown',
+          profilePicture: null,
+          lastSeen: null,
+          connectionQuality: 'unknown',
+          operatorInfo: null
+        };
+      }
+
+      // Remove the nested whatsappSession object
+      delete sessionData.whatsappSession;
+      
+      return sessionData;
+    });
+
     res.json({
       success: true,
       data: {
-        sessions,
+        sessions: transformedSessions,
         pagination: {
           total: count,
           limit: parseInt(limit),

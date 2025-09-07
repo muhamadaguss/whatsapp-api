@@ -170,4 +170,13 @@ BlastSession.findBySessionId = function (sessionId) {
   });
 };
 
+// Association with Session model (WhatsApp sessions)
+BlastSession.associate = function(models) {
+  BlastSession.belongsTo(models.Session, {
+    foreignKey: 'whatsappSessionId',
+    targetKey: 'sessionId',
+    as: 'whatsappSession'
+  });
+};
+
 module.exports = BlastSession;
