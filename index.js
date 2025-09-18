@@ -27,11 +27,13 @@ const chatsRoutes = require("./routes/chatRoutes");
 const contactRoutes = require("./routes/contactRoutes");
 const cleanupRoutes = require("./routes/cleanupRoutes");
 const blastControlRoutes = require("./routes/blastControlRoutes");
+const whatsappStatusRoutes = require("./routes/whatsappStatusRoutes");
 const sequelize = require("./models/db");
 const { loadExistingSessions } = require("./auth/session");
 const logger = require("./utils/logger"); // Mengimpor logger
 const { initSocket } = require("./auth/socket");
 const { errorHandler, notFound } = require("./middleware/errorHandler");
+const { whatsAppStatusMonitor } = require("./services/whatsAppStatusMonitor");
 const {
   DatabaseHealthCheck,
   testDatabaseConnection,
@@ -226,6 +228,7 @@ app.use("/cleanup", cleanupRoutes);
 app.use("/classifier", require("./routes/classifierRoutes"));
 app.use("/spin-text", require("./routes/spinTextRoutes"));
 app.use("/blast-control", blastControlRoutes);
+app.use("/whatsapp-status", whatsappStatusRoutes);
 
 // Error handling middleware (harus di akhir setelah semua routes)
 app.use(notFound); // 404 handler
@@ -317,6 +320,10 @@ async function startApplication() {
     // Load existing WhatsApp sessions
     await loadExistingSessions();
     logger.info("📱 All existing sessions loaded");
+
+    // Initialize WhatsApp Status Monitor
+    whatsAppStatusMonitor.initialize(io);
+    logger.info("📊 WhatsApp Status Monitor initialized");
 
     // Start file cleanup manager
     fileCleanup.startAutoCleanup();

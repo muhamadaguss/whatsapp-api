@@ -13,6 +13,7 @@ const MessageStatusModel = require("../models/messageStatusModel");
 const ChatMessageModel = require("../models/chatModel");
 const logger = require("../utils/logger");
 const { getSocket } = require("./socket");
+const { whatsAppStatusMonitor } = require("../services/whatsAppStatusMonitor");
 
 const sessions = {}; // sessionId => { sock, qr }
 const qrWaiters = {}; // sessionId => [resolveFn1, resolveFn2, ...]
@@ -112,23 +113,80 @@ async function startWhatsApp(sessionId, userId = null) {
     });
   });
 
-  // Monitor WebSocket connection state
+  // Enhanced WebSocket monitoring with status tracking
   if (sock.ws) {
-    sock.ws.on("close", (code, reason) => {
+    sock.ws.on("close", async (code, reason) => {
       logger.warn(
         `🔌 WebSocket closed for session ${sessionId}: ${code} - ${reason}`
       );
+      
+      // Track WebSocket close event
+      await whatsAppStatusMonitor.trackSession(
+        sessionId,
+        sessionId,
+        'websocket_closed',
+        { 
+          code, 
+          reason: reason?.toString(),
+          timestamp: new Date(),
+          unexpected: code !== 1000 // 1000 is normal closure
+        }
+      );
     });
 
-    sock.ws.on("error", (error) => {
+    sock.ws.on("error", async (error) => {
       logger.error(
         `❌ WebSocket error for session ${sessionId}:`,
         error.message
       );
+      
+      // Track WebSocket error
+      await whatsAppStatusMonitor.trackSession(
+        sessionId,
+        sessionId,
+        'websocket_error',
+        { 
+          error: error.message,
+          code: error.code,
+          timestamp: new Date()
+        }
+      );
     });
 
-    sock.ws.on("open", () => {
+    sock.ws.on("open", async () => {
       logger.info(`✅ WebSocket opened for session ${sessionId}`);
+      
+      // Track WebSocket open event
+      await whatsAppStatusMonitor.trackSession(
+        sessionId,
+        sessionId,
+        'websocket_opened',
+        { 
+          timestamp: new Date(),
+          readyState: sock.ws.readyState
+        }
+      );
+    });
+
+    // Monitor WebSocket ping/pong for connection quality
+    sock.ws.on("ping", async () => {
+      const pingTimestamp = Date.now();
+      
+      sock.ws.once("pong", async () => {
+        const pongTimestamp = Date.now();
+        const responseTime = pongTimestamp - pingTimestamp;
+        
+        await whatsAppStatusMonitor.trackSession(
+          sessionId,
+          sessionId,
+          'ping_pong',
+          { 
+            responseTime,
+            timestamp: new Date(),
+            quality: responseTime < 1000 ? 'good' : responseTime < 3000 ? 'fair' : 'poor'
+          }
+        );
+      });
     });
   }
   sock.ev.on("messages.upsert", (msgUpdate) => {
@@ -746,18 +804,83 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
 
 async function handleConnectionUpdate(update, sessionId, sock, userId, io) {
   try {
-    const { connection, lastDisconnect, qr } = update;
+    const { connection, lastDisconnect, qr, isNewLogin, isOnline, receivedPendingNotifications } = update;
 
     logger.info(`🔄 Connection update for session ${sessionId}: ${connection}`);
+
+    // Enhanced status tracking with WhatsAppStatusMonitor
+    const statusMetadata = {
+      connection,
+      isNewLogin,
+      isOnline,
+      receivedPendingNotifications,
+      lastDisconnect: lastDisconnect ? {
+        error: lastDisconnect.error,
+        output: lastDisconnect.output
+      } : null,
+      timestamp: new Date(),
+      responseTime: sock.ws?.pingInterval || 0
+    };
+
+    // Track status based on connection state
+    let trackingStatus = 'unknown';
+    switch (connection) {
+      case 'connecting':
+        trackingStatus = 'connecting';
+        break;
+      case 'open':
+        trackingStatus = 'connected';
+        break;
+      case 'close':
+        // Determine if it's a temporary disconnect or permanent issue
+        if (lastDisconnect?.error?.output?.statusCode) {
+          const statusCode = lastDisconnect.error.output.statusCode;
+          if (statusCode === DisconnectReason.loggedOut) {
+            trackingStatus = 'logged_out';
+          } else if (statusCode === DisconnectReason.forbidden) {
+            trackingStatus = 'blocked';
+          } else if (statusCode === DisconnectReason.badSession) {
+            trackingStatus = 'banned';
+          } else {
+            trackingStatus = 'disconnected';
+          }
+        } else {
+          trackingStatus = 'disconnected';
+        }
+        break;
+      default:
+        trackingStatus = 'unknown';
+    }
+
+    // Track the status with enhanced metadata
+    await whatsAppStatusMonitor.trackSession(
+      sessionId,
+      sessionId, // whatsappSessionId same as sessionId in this context
+      trackingStatus,
+      statusMetadata
+    );
 
     if (qr) {
       try {
         await handleQR(qr, sessionId, userId, io);
+        // Track QR generation
+        await whatsAppStatusMonitor.trackSession(
+          sessionId,
+          sessionId,
+          'qr_generated',
+          { ...statusMetadata, qr: true }
+        );
       } catch (qrError) {
         logger.error(`❌ Error handling QR for session ${sessionId}:`, {
           error: qrError.message,
           stack: qrError.stack,
         });
+        await whatsAppStatusMonitor.trackSession(
+          sessionId,
+          sessionId,
+          'qr_error',
+          { ...statusMetadata, error: qrError.message }
+        );
         throw qrError;
       }
     }
@@ -770,16 +893,45 @@ async function handleConnectionUpdate(update, sessionId, sock, userId, io) {
           error: disconnectError.message,
           stack: disconnectError.stack,
         });
+        await whatsAppStatusMonitor.trackSession(
+          sessionId,
+          sessionId,
+          'disconnect_error',
+          { ...statusMetadata, error: disconnectError.message }
+        );
         throw disconnectError;
       }
     } else if (connection === "open") {
       try {
         await handleConnected(sock, sessionId, userId, io);
+        
+        // Track successful connection with additional metadata
+        const connectionMetadata = {
+          ...statusMetadata,
+          phoneNumber: sock.user?.id?.split(':')[0],
+          deviceInfo: sock.user?.name,
+          platform: sock.user?.platform,
+          connectionTime: new Date()
+        };
+        
+        await whatsAppStatusMonitor.trackSession(
+          sessionId,
+          sessionId,
+          'connected',
+          connectionMetadata
+        );
+        
       } catch (connectError) {
         logger.error(`❌ Error handling connected for session ${sessionId}:`, {
           error: connectError.message,
           stack: connectError.stack,
         });
+        await whatsAppStatusMonitor.trackSession(
+          sessionId,
+          sessionId,
+          'connect_error',
+          { ...statusMetadata, error: connectError.message }
+        );
         throw connectError;
       }
     }
@@ -794,6 +946,17 @@ async function handleConnectionUpdate(update, sessionId, sock, userId, io) {
         stack: error.stack,
       }
     );
+    
+    // Track the error
+    await whatsAppStatusMonitor.trackSession(
+      sessionId,
+      sessionId,
+      'connection_error',
+      { error: error.message, update }
+    ).catch(trackError => {
+      logger.error(`❌ Failed to track connection error:`, trackError);
+    });
+    
     // Don't re-throw to prevent session crash
   }
 }
