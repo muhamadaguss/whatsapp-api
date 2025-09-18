@@ -8,6 +8,9 @@ const BlastSession = require("../models/blastSessionModel");
 const BlastMessage = require("../models/blastMessageModel");
 const { AppError } = require("../middleware/errorHandler");
 const blastExecutionService = require("../services/blastExecutionService"); // Import blastExecutionService
+const xlsx = require("xlsx"); // Add Excel processing support
+const fs = require("fs"); // Add file system support
+const SpinTextEngine = require("../utils/spinTextEngine"); // Add spin text support
 const BlastRealTimeService = require("../services/blastRealTimeService");
 
 // Create singleton instance
@@ -368,7 +371,62 @@ const emitSessionUpdate = async (userId = null) => {
  */
 
 /**
+ * Parse Excel file and convert to messageList format
+ * Reuses logic from excelService.js for consistency
+ */
+const parseExcelToMessageList = (filePath, selectTarget = null, inputNumbers = null) => {
+  try {
+    let rows = [];
+    
+    if (selectTarget === "input" && inputNumbers) {
+      // Parse manual input (like in excelService.js)
+      rows = inputNumbers
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => {
+          const [no, name] = line.split("|").map((part) => part.trim());
+          const row = { no };
+          if (name) row.name = name;
+          return row;
+        });
+    } else {
+      // Parse Excel file (like in excelService.js)
+      const workbook = xlsx.readFile(filePath);
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      rows = xlsx.utils.sheet_to_json(sheet);
+    }
+
+    // Convert to Enhanced Blast messageList format
+    const messageList = rows.map((row) => ({
+      phone: String(row["no"] || row["phone"] || "").replace(/\D/g, ""),
+      contactName: row["name"] || row["contactName"] || undefined,
+      variables: {
+        name: row["name"] || "",
+        company: row["company"] || "",
+        custom1: row["custom1"] || "",
+        custom2: row["custom2"] || "",
+        // Add any other columns as variables
+        ...Object.keys(row).reduce((vars, key) => {
+          if (!["no", "phone", "name", "contactName"].includes(key)) {
+            vars[key] = row[key] || "";
+          }
+          return vars;
+        }, {})
+      }
+    })).filter(item => item.phone.length > 0); // Filter out entries without phone numbers
+
+    logger.info(`📊 Parsed Excel: ${messageList.length} valid contacts from ${rows.length} rows`);
+    return messageList;
+  } catch (error) {
+    logger.error(`❌ Failed to parse Excel file:`, error);
+    throw new AppError(`Failed to parse Excel file: ${error.message}`, 400);
+  }
+};
+
+/**
  * Create new blast session
+ * Supports both messageList array and Excel file upload
  */
 const createBlastSession = async (req, res) => {
   const {
@@ -377,38 +435,55 @@ const createBlastSession = async (req, res) => {
     messageTemplate,
     messageList,
     config = {},
+    selectTarget,
+    inputNumbers
   } = req.body;
 
-  // Validation
-  if (
-    !whatsappSessionId ||
-    !messageTemplate ||
-    !messageList ||
-    !Array.isArray(messageList)
-  ) {
+  const filePath = req.file?.path; // Excel file path from multer
+
+  // Basic validation
+  if (!whatsappSessionId || !messageTemplate) {
     throw new AppError(
-      "Missing required fields: whatsappSessionId, messageTemplate, messageList",
+      "Missing required fields: whatsappSessionId, messageTemplate",
       400
     );
   }
 
-  if (messageList.length === 0) {
-    throw new AppError("Message list cannot be empty", 400);
-  }
+  let finalMessageList = [];
 
   try {
+    // Determine data source and parse accordingly
+    if (messageList && Array.isArray(messageList) && messageList.length > 0) {
+      // Method 1: Direct messageList array (from Enhanced Creator frontend parsing)
+      finalMessageList = messageList;
+      logger.info(`📝 Using provided messageList: ${messageList.length} contacts`);
+    } else if (filePath || (selectTarget === "input" && inputNumbers)) {
+      // Method 2: Excel file upload or manual input (like legacy blast)
+      finalMessageList = parseExcelToMessageList(filePath, selectTarget, inputNumbers);
+      logger.info(`📊 Parsed from file/input: ${finalMessageList.length} contacts`);
+    } else {
+      throw new AppError(
+        "No data source provided. Please provide messageList array, Excel file, or manual input",
+        400
+      );
+    }
+
+    if (finalMessageList.length === 0) {
+      throw new AppError("No valid contacts found", 400);
+    }
+
     // Create blast session
     const result = await blastSessionManager.createSession({
       userId: req.user.id,
       whatsappSessionId,
       campaignName: campaignName || `Campaign ${Date.now()}`,
       messageTemplate,
-      messageList,
+      messageList: finalMessageList,
       config,
     });
 
     logger.info(
-      `✅ Blast session created by user ${req.user.id}: ${result.sessionId}`
+      `✅ Blast session created by user ${req.user.id}: ${result.sessionId} with ${finalMessageList.length} messages`
     );
 
     // Emit session update to user
@@ -429,6 +504,18 @@ const createBlastSession = async (req, res) => {
       error
     );
     throw new AppError(`Failed to create blast session: ${error.message}`, 500);
+  } finally {
+    // Cleanup temporary Excel file if it exists
+    if (filePath) {
+      try {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+          logger.info(`🗑️ Temporary Excel file cleaned up: ${filePath}`);
+        }
+      } catch (cleanupError) {
+        logger.warn(`⚠️ Failed to cleanup temporary file: ${cleanupError.message}`);
+      }
+    }
   }
 };
 

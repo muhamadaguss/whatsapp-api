@@ -1,8 +1,44 @@
 const express = require("express");
 const router = express.Router();
+const multer = require("multer");
+const path = require("path");
 const blastControlController = require("../controllers/blastControlController");
 const { verifyToken } = require("../middleware/authMiddleware");
 const { asyncHandler } = require("../middleware/errorHandler");
+
+// Configure multer for Excel file uploads (reuse from whatsappRoutes.js)
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, "uploads/");
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + path.extname(file.originalname));
+  },
+});
+
+const upload = multer({
+  storage,
+  fileFilter: (req, file, cb) => {
+    // Allow Excel files for Enhanced Blast
+    if (file.fieldname === "excel") {
+      const allowedMimes = [
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
+        "application/vnd.ms-excel", // .xls
+        "text/csv" // .csv
+      ];
+      if (allowedMimes.includes(file.mimetype)) {
+        cb(null, true);
+      } else {
+        cb(new Error("Only Excel files (.xlsx, .xls) and CSV files are allowed"), false);
+      }
+    } else {
+      cb(null, true);
+    }
+  },
+  limits: {
+    fileSize: 10 * 1024 * 1024, // 10MB limit for Excel files
+  },
+});
 
 /**
  * Blast Control Routes
@@ -23,6 +59,7 @@ router.post(
 );
 router.post(
   "/sessions",
+  upload.single("excel"), // Add Excel file upload support
   asyncHandler(blastControlController.createBlastSession)
 );
 router.post(
