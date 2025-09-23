@@ -869,7 +869,12 @@ async function handleConnected(sock, sessionId, userId, io) {
     logger.info(`🔄 Connection opened for session ${sessionId}`);
     logger.info(`💾 Session ${sessionId} connected to DB`);
 
-    io.emit("qr_scanned", { sessionId, message: "QR Code Scanned" });
+    // Emit to user-specific room instead of all clients
+    io.to(`user_${userId}`).emit("qr_scanned", {
+      sessionId,
+      message: "QR Code Scanned",
+      userId
+    });
   } catch (error) {
     logger.error(`❌ Error in handleConnected for session ${sessionId}:`, {
       error: error.message,
@@ -894,7 +899,6 @@ async function handleDisconnect(lastDisconnect, sessionId, userId) {
     DisconnectReason.connectionReplaced,
     DisconnectReason.timedOut,
     DisconnectReason.restartRequired,
-    DisconnectReason.unavailableService,
   ];
 
   const DO_NOT_RECONNECT_REASONS = [
@@ -902,6 +906,7 @@ async function handleDisconnect(lastDisconnect, sessionId, userId) {
     DisconnectReason.badSession,
     DisconnectReason.multideviceMismatch,
     DisconnectReason.forbidden,
+    DisconnectReason.unavailableService,
   ];
 
   if (AUTO_RECONNECT_REASONS.includes(statusCode)) {

@@ -54,6 +54,14 @@ function initSocket(server) {
       // Join user-specific room
       socket.join(`user_${socket.userId}`);
       
+      // Handle explicit room joining (for additional confirmation)
+      socket.on('join_user_room', (userId) => {
+        if (userId && socket.userId === userId) {
+          socket.join(`user_${userId}`);
+          console.log(`User ${userId} explicitly joined room: user_${userId}`);
+        }
+      });
+      
       socket.on('disconnect', () => {
         console.log(`User ${socket.userId} disconnected from socket: ${socket.id}`);
       });
