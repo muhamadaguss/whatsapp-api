@@ -23,6 +23,38 @@ const statusPriority = {
   read: 3,
 };
 
+// ✨ Helper function to check if session already exists and get its info
+async function checkSessionExists(sessionId, expectedUserId = null) {
+  try {
+    const existingSession = await SessionModel.findOne({ 
+      where: { sessionId } 
+    });
+    
+    if (!existingSession) {
+      return { exists: false, session: null };
+    }
+    
+    // If expectedUserId is provided and different from existing, return conflict
+    if (expectedUserId && existingSession.userId && existingSession.userId !== expectedUserId) {
+      return { 
+        exists: true, 
+        session: existingSession, 
+        conflict: true,
+        message: `Session ${sessionId} sudah ada dengan userId berbeda (${existingSession.userId})` 
+      };
+    }
+    
+    return { 
+      exists: true, 
+      session: existingSession, 
+      conflict: false 
+    };
+  } catch (error) {
+    logger.error(`❌ Error checking session existence: ${error.message}`);
+    return { exists: false, session: null, error: error.message };
+  }
+}
+
 // Helper function to get readable status code description
 function getStatusCodeDescription(statusCode) {
   const statusDescriptions = {
@@ -71,6 +103,20 @@ function canWriteToDirectory(dirPath) {
 
 async function startWhatsApp(sessionId, userId = null) {
   const io = getSocket();
+
+  // ✨ Check if session already exists in database
+  const sessionCheck = await checkSessionExists(sessionId, userId);
+  
+  if (sessionCheck.conflict) {
+    logger.error(`❌ Session conflict: ${sessionCheck.message}`);
+    throw new Error(sessionCheck.message);
+  }
+  
+  if (sessionCheck.exists) {
+    logger.info(`📋 Session ${sessionId} already exists in DB with userId: ${sessionCheck.session.userId}`);
+    // Use existing userId from database
+    userId = sessionCheck.session.userId;
+  }
 
   // Ensure sessions directory exists
   ensureSessionsDirectory();
@@ -811,13 +857,39 @@ async function handleQR(qr, sessionId, userId, io) {
 
     logger.info(`🔄 QR Code updated for session ${sessionId}`);
 
+    // ✨ Check existing session and preserve userId
+    const sessionCheck = await checkSessionExists(sessionId, userId);
+    let finalUserId = userId;
+    
+    if (sessionCheck.exists) {
+      // If session exists, preserve the existing userId
+      if (sessionCheck.session.userId) {
+        finalUserId = sessionCheck.session.userId;
+        logger.info(`📋 Using existing userId ${finalUserId} for session ${sessionId}`);
+      }
+      // If existing userId is null and we have a new userId, use the new one
+      else if (!sessionCheck.session.userId && userId) {
+        finalUserId = userId;
+        logger.info(`📝 Updating session ${sessionId} with new userId: ${userId}`);
+      }
+    } else {
+      // New session, use provided userId
+      logger.info(`🆕 Creating new session ${sessionId} with userId: ${userId}`);
+    }
+
+    // Upsert with the final userId
     await SessionModel.upsert({
       sessionId,
       status: "pending",
-      userId,
+      userId: finalUserId,
     });
 
-    logger.info(`💾 Session ${sessionId} saved to DB`);
+    logger.info(`💾 Session ${sessionId} saved to DB with userId: ${finalUserId}`);
+
+    if (qrWaiters[sessionId]) {
+      qrWaiters[sessionId].forEach((resolve) => resolve(qrData));
+      delete qrWaiters[sessionId];
+    }
 
     if (qrWaiters[sessionId]) {
       qrWaiters[sessionId].forEach((resolve) => resolve(qrData));
@@ -841,17 +913,24 @@ async function handleConnected(sock, sessionId, userId, io) {
 
     sessions[sessionId].qr = null;
 
-    // Ambil userId dari DB jika belum tersedia
-    if (!userId) {
-      try {
-        const session = await SessionModel.findOne({ where: { sessionId } });
-        userId = session?.userId || null;
-      } catch (dbError) {
-        logger.warn(
-          `⚠️ Could not fetch userId from DB for session ${sessionId}:`,
-          dbError.message
-        );
+    // ✨ Check existing session and preserve userId
+    const sessionCheck = await checkSessionExists(sessionId, userId);
+    let finalUserId = userId;
+    
+    if (sessionCheck.exists) {
+      // If session exists, preserve the existing userId
+      if (sessionCheck.session.userId) {
+        finalUserId = sessionCheck.session.userId;
+        logger.info(`📋 Using existing userId ${finalUserId} for session ${sessionId}`);
       }
+      // If existing userId is null and we have a new userId, use the new one
+      else if (!sessionCheck.session.userId && userId) {
+        finalUserId = userId;
+        logger.info(`📝 Updating session ${sessionId} with new userId: ${userId}`);
+      }
+    } else {
+      // New session, use provided userId
+      logger.info(`🆕 Creating new session ${sessionId} with userId: ${userId}`);
     }
 
     // Validate sock.user exists
@@ -862,18 +941,18 @@ async function handleConnected(sock, sessionId, userId, io) {
     await SessionModel.upsert({
       sessionId,
       status: "connected",
-      userId,
+      userId: finalUserId,
       phoneNumber: sock.user.id.split(":")[0],
     });
 
     logger.info(`🔄 Connection opened for session ${sessionId}`);
-    logger.info(`💾 Session ${sessionId} connected to DB`);
+    logger.info(`💾 Session ${sessionId} connected to DB with userId: ${finalUserId}`);
 
     // Emit to user-specific room instead of all clients
-    io.to(`user_${userId}`).emit("qr_scanned", {
+    io.to(`user_${finalUserId}`).emit("qr_scanned", {
       sessionId,
       message: "QR Code Scanned",
-      userId
+      userId: finalUserId
     });
   } catch (error) {
     logger.error(`❌ Error in handleConnected for session ${sessionId}:`, {
@@ -1140,4 +1219,5 @@ module.exports = {
   getContactDetails,
   refreshContactNames,
   getContactNameForSession,
+  checkSessionExists,
 };

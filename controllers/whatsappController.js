@@ -4,6 +4,7 @@ const {
   startWhatsApp,
   getActiveSessionIds,
   cleanupSession,
+  checkSessionExists,
 } = require("../auth/session");
 const {
   checkSessionHealth,
@@ -19,9 +20,24 @@ const { asyncHandler, AppError } = require("../middleware/errorHandler");
 
 const getQRImage = asyncHandler(async (req, res) => {
   const { sessionId } = req.params;
+  const userId = req.user?.id;
+
+  // ✨ Check if session already exists with different userId
+  const sessionCheck = await checkSessionExists(sessionId, userId);
+  
+  if (sessionCheck.conflict) {
+    throw new AppError(sessionCheck.message, 409); // 409 Conflict
+  }
 
   if (!getSock(sessionId)) {
-    await startWhatsApp(sessionId, req.user?.id); // QR akan otomatis ter-generate
+    try {
+      await startWhatsApp(sessionId, userId);
+    } catch (error) {
+      if (error.message.includes("sudah ada dengan userId berbeda")) {
+        throw new AppError(error.message, 409); // 409 Conflict
+      }
+      throw error;
+    }
   }
 
   const qrData = await waitForQRCode(sessionId);
