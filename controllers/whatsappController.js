@@ -278,10 +278,12 @@ const sendMessageWA = asyncHandler(async (req, res) => {
     // Jangan throw error, response tetap success
   }
 
-  // Also save to chat messages for consistency
+  // ✨ FIXED: Save to chat messages with duplicate prevention
   try {
     const ChatMessageModel = require("../models/chatModel");
-    await ChatMessageModel.create({
+    
+    const messageData = {
+      messageId: result.key.id, // Use WhatsApp message ID for deduplication
       sessionId,
       from: phone + "@s.whatsapp.net",
       contactName: phone,
@@ -291,10 +293,26 @@ const sendMessageWA = asyncHandler(async (req, res) => {
       timestamp: new Date(),
       fromMe: true,
       isRead: true,
+    };
+
+    // Use upsert to prevent duplicate messages
+    const [chatMessage, created] = await ChatMessageModel.upsert(messageData, {
+      returning: true,
+      conflictFields: ['messageId']
     });
-    logger.info(`💾 Chat message saved for sent message to ${phone}`);
+
+    if (created) {
+      logger.info(`💾 New chat message saved for sent message to ${phone}`);
+    } else {
+      logger.info(`🔄 Chat message already exists for messageId: ${result.key.id}`);
+    }
   } catch (chatDbError) {
-    logger.error(`❌ Failed to save chat message:`, chatDbError.message);
+    logger.error(`❌ Failed to save chat message:`, {
+      error: chatDbError.message,
+      messageId: result.key.id,
+      phone,
+      sessionId,
+    });
   }
 
   return res.status(200).json({ status: "success", result });

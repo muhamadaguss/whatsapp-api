@@ -728,6 +728,7 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
         if (isPrivateChat && text !== "[Non-text message]") {
           try {
             const messageData = {
+              messageId: msg.key.id, // ✨ FIXED: Use WhatsApp message ID for deduplication
               sessionId: sessionId || "unknown",
               from: from || "unknown",
               contactName: contactName,
@@ -741,7 +742,16 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
               isRead: Boolean(isFromMe),
             };
 
-            await ChatMessageModel.create(messageData);
+            // ✨ FIXED: Use upsert to prevent duplicate messages
+            const [chatMessage, created] = await ChatMessageModel.upsert(messageData, {
+              returning: true,
+              conflictFields: ['messageId']
+            });
+
+            if (!created) {
+              logger.info(`🔄 Duplicate message ignored: ${msg.key.id}`);
+              continue; // Skip emitting duplicate messages
+            }
 
             const io = getSocket();
             io.emit("new_message", {
