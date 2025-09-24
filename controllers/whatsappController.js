@@ -380,9 +380,32 @@ const logoutSession = asyncHandler(async (req, res) => {
 
 const getActiveSessions = asyncHandler(async (req, res) => {
   const userId = req.user.id; // pastikan middleware auth sudah pasang req.user
+  
+  // ✨ NEW: Extract pagination parameters from query
+  const { 
+    limit = 10, 
+    offset = 0, 
+    search = '',
+    sortBy = 'createdAt',
+    sortOrder = 'DESC'
+  } = req.query;
 
-  const activeSessions = await SessionModel.findAll({
-    where: { userId }, // filter hanya session milik user login
+  // ✨ NEW: Build where clause with search functionality
+  const { Op } = require('sequelize');
+  const whereClause = { userId };
+  
+  // Add search functionality if search term provided
+  if (search && search.trim() !== '') {
+    whereClause[Op.or] = [
+      { sessionId: { [Op.iLike]: `%${search.trim()}%` } },
+      { phoneNumber: { [Op.iLike]: `%${search.trim()}%` } },
+      { displayName: { [Op.iLike]: `%${search.trim()}%` } }
+    ];
+  }
+
+  // ✨ NEW: Use findAndCountAll for pagination support
+  const { count, rows: activeSessions } = await SessionModel.findAndCountAll({
+    where: whereClause,
     include: [
       {
         model: UserModel,
@@ -390,11 +413,25 @@ const getActiveSessions = asyncHandler(async (req, res) => {
         attributes: ["id", "username", "role"], // ambil kolom yang diperlukan dari User
       },
     ],
+    order: [[sortBy, sortOrder.toUpperCase()]],
+    limit: parseInt(limit),
+    offset: parseInt(offset)
   });
 
+  // ✨ NEW: Enhanced response with pagination info
   return res.status(200).json({
     status: "success",
-    activeSessions,
+    data: {
+      activeSessions,
+      pagination: {
+        total: count,
+        limit: parseInt(limit),
+        offset: parseInt(offset),
+        totalPages: Math.ceil(count / parseInt(limit)),
+        currentPage: Math.floor(parseInt(offset) / parseInt(limit)) + 1,
+        hasMore: parseInt(offset) + parseInt(limit) < count
+      }
+    }
   });
 });
 
