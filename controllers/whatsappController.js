@@ -401,7 +401,7 @@ const getActiveSessions = asyncHandler(async (req, res) => {
   
   // ✨ NEW: Extract pagination parameters from query
   const { 
-    limit = 10, 
+    limit, // No default, if not provided, get all
     offset = 0, 
     search = '',
     sortBy = 'createdAt',
@@ -421,8 +421,8 @@ const getActiveSessions = asyncHandler(async (req, res) => {
     ];
   }
 
-  // ✨ NEW: Use findAndCountAll for pagination support
-  const { count, rows: activeSessions } = await SessionModel.findAndCountAll({
+  // ✨ NEW: Build query options
+  const queryOptions = {
     where: whereClause,
     include: [
       {
@@ -432,24 +432,31 @@ const getActiveSessions = asyncHandler(async (req, res) => {
       },
     ],
     order: [[sortBy, sortOrder.toUpperCase()]],
-    limit: parseInt(limit),
-    offset: parseInt(offset)
-  });
+  };
 
-  // ✨ NEW: Enhanced response with pagination info
+  // If limit is provided and > 0, add pagination
+  if (limit && parseInt(limit) > 0) {
+    queryOptions.limit = parseInt(limit);
+    queryOptions.offset = parseInt(offset);
+  } // If not, get all (no limit/offset)
+
+  // ✨ NEW: Use findAndCountAll for pagination support
+  const { count, rows: activeSessions } = await SessionModel.findAndCountAll(queryOptions);
+
+  // ✨ NEW: Enhanced response with pagination info only if paginated
   return res.status(200).json({
     status: "success",
     data: {
       activeSessions,
-      pagination: {
+      pagination: limit && parseInt(limit) > 0 ? {
         total: count,
         limit: parseInt(limit),
         offset: parseInt(offset),
         totalPages: Math.ceil(count / parseInt(limit)),
         currentPage: Math.floor(parseInt(offset) / parseInt(limit)) + 1,
         hasMore: parseInt(offset) + parseInt(limit) < count
-      }
-    }
+      } : null, // No pagination info if getAll
+    },
   });
 });
 
