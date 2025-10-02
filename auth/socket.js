@@ -61,6 +61,18 @@ function initSocket(server) {
           console.log(`User ${userId} explicitly joined room: user_${userId}`);
         }
       });
+
+      // Test message handler for debugging
+      socket.on('test_message', (data) => {
+        console.log(`🧪 Test message received from user ${socket.userId}:`, data);
+        // Echo back the message
+        socket.emit('test_response', { 
+          message: 'Test successful', 
+          original: data,
+          userId: socket.userId,
+          timestamp: new Date()
+        });
+      });
       
       socket.on('disconnect', () => {
         console.log(`User ${socket.userId} disconnected from socket: ${socket.id}`);

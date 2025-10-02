@@ -178,6 +178,12 @@ async function startWhatsApp(sessionId, userId = null) {
     });
   }
   sock.ev.on("messages.upsert", (msgUpdate) => {
+    logger.info(`📨 RECEIVED messages.upsert event for session ${sessionId}:`, {
+      messageCount: msgUpdate.messages?.length || 0,
+      type: msgUpdate.type,
+      hasMessages: !!msgUpdate.messages
+    });
+    
     handleMessagesUpsert(msgUpdate, sessionId).catch((err) => {
       logger.error(
         `❌ Error handling messages upsert for session ${sessionId}:`,
@@ -459,6 +465,8 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
     const messages = msgUpdate.messages;
     const sock = sessions[sessionId]?.sock;
 
+    logger.info(`📨 Processing ${messages.length} messages for session ${sessionId}`);
+
     for (const msg of messages) {
       try {
         if (!msg.message) continue; // Skip if no message content
@@ -716,14 +724,24 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
         }
 
         // === GET CONTACT NAME ===
-        const contactName = isFromMe
-          ? "Me"
-          : await getContactNameWithCache(sock, from);
+        const contactName = await getContactNameWithCache(sock, from);
 
         logger.info(`📩 Chat from ${contactName} (${from}): ${text}`);
 
         // === SAVE ONLY PRIVATE CHAT (NOT GROUP / NOT NEWSLETTER) ===
         const isPrivateChat = from.endsWith("@s.whatsapp.net");
+        const isGroup = from.includes("@g.us");
+        const isNewsletter = from.includes("@newsletter");
+
+        logger.info(`💾 Processing message for session ${sessionId}:`, {
+          from,
+          isPrivateChat,
+          isGroup,
+          isNewsletter,
+          text: text?.substring(0, 50),
+          messageId: msg.key.id,
+          messageType
+        });
 
         if (isPrivateChat && text !== "[Non-text message]") {
           try {
@@ -750,21 +768,61 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
 
             if (!created) {
               logger.info(`🔄 Duplicate message ignored: ${msg.key.id}`);
-              continue; // Skip emitting duplicate messages
+              // Don't skip - we still need to emit to socket for real-time updates
             }
 
             const io = getSocket();
-            io.emit("new_message", {
-              sessionId,
-              from,
-              contactName,
-              text,
-              messageType,
-              mediaUrl,
-              timestamp: new Date(Number(msg.messageTimestamp) * 1000),
-              fromMe: isFromMe,
-              isRead: Boolean(isFromMe),
+            
+            // Get userId from session to send message to correct user room
+            const sessionData = await SessionModel.findOne({
+              where: { sessionId },
+              attributes: ['userId']
             });
+            
+            logger.info(`🔍 Session lookup for real-time message:`, {
+              sessionId,
+              sessionDataFound: !!sessionData,
+              userId: sessionData?.userId,
+              messageId: msg.key.id,
+              from,
+              text: text?.substring(0, 50)
+            });
+            
+            if (sessionData?.userId) {
+              logger.info(`📡 EMITTING socket event to user_${sessionData.userId}:`, {
+                event: 'new_message',
+                sessionId,
+                from,
+                contactName,
+                text: text?.substring(0, 50),
+                messageType,
+                timestamp: new Date(Number(msg.messageTimestamp) * 1000),
+                fromMe: isFromMe,
+                isDuplicate: !created
+              });
+
+              io.to(`user_${sessionData.userId}`).emit("new_message", {
+                sessionId,
+                from,
+                contactName,
+                text,
+                messageType,
+                mediaUrl,
+                timestamp: new Date(Number(msg.messageTimestamp) * 1000),
+                fromMe: isFromMe,
+                isRead: Boolean(isFromMe),
+              });
+
+              logger.info(
+                `✅ Real-time message sent to user_${sessionData.userId} from ${contactName} (${from}) - ${created ? 'NEW' : 'DUPLICATE'}`
+              );
+            } else {
+              logger.error(`❌ CRITICAL: Could not find userId for session ${sessionId}, skipping real-time update`, {
+                sessionId,
+                sessionData,
+                availableSessions: Object.keys(sessions)
+              });
+            }
 
             logger.info(
               `💾 Chat message saved to database from ${contactName} (${from})`
