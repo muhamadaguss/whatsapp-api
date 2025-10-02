@@ -242,6 +242,10 @@ io.on("connection", (socket) => {
   if (socket.userId) {
     socket.join(`user_${socket.userId}`);
     logger.info(`👤 User ${socket.userId} joined room: user_${socket.userId}`);
+    
+    // Log current rooms for debugging
+    const rooms = Array.from(socket.rooms);
+    logger.info(`🏠 Socket ${socket.id} is in rooms:`, rooms);
   }
   
   socket.on("disconnect", () => {

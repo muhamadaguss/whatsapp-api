@@ -84,6 +84,13 @@ const sendMessageWA = asyncHandler(async (req, res) => {
 
   // Check session health (use permissive mode for better compatibility)
   const health = checkSessionHealth(sock, sessionId, true);
+  logger.info(`🔍 Session health check for ${sessionId}:`, {
+    isHealthy: health.isHealthy,
+    issues: health.issues,
+    websocketState: health.details.websocketState,
+    userAuthenticated: health.details.userAuthenticated,
+  });
+  
   if (!health.isHealthy) {
     logSessionHealth(sock, sessionId);
 
@@ -247,10 +254,64 @@ const sendMessageWA = asyncHandler(async (req, res) => {
       );
     }
   } else {
-    // Send text message
-    result = await sock.sendMessage(phone + "@s.whatsapp.net", {
-      text: message,
-    });
+    // Send text message with retry mechanism
+    let retryCount = 0;
+    const maxRetries = 3;
+
+    while (retryCount < maxRetries) {
+      try {
+        logger.info(
+          `📨 Attempting to send text message (attempt ${
+            retryCount + 1
+          }/${maxRetries})`
+        );
+
+        // Double-check connection before sending
+        if (
+          sock.ws &&
+          sock.ws.readyState !== 1 &&
+          sock.ws.readyState !== undefined
+        ) {
+          throw new Error(`WebSocket not ready (state: ${sock.ws.readyState})`);
+        }
+
+        result = await sock.sendMessage(phone + "@s.whatsapp.net", {
+          text: message,
+        });
+
+        logger.info(`✅ Text message sent successfully on attempt ${retryCount + 1}`);
+        break; // Success, exit retry loop
+      } catch (sendError) {
+        retryCount++;
+        logger.error(`❌ Text message send attempt ${retryCount} failed:`, {
+          error: sendError.message,
+          phone,
+          sessionId,
+          retryCount,
+        });
+
+        if (retryCount >= maxRetries) {
+          // All retries failed, throw the error
+          throw new AppError(
+            `Gagal mengirim pesan teks setelah ${maxRetries} percobaan. Error: ${sendError.message}`,
+            500
+          );
+        }
+
+        // Wait before retry (exponential backoff)
+        const waitTime = Math.pow(2, retryCount) * 1000; // 2s, 4s, 8s
+        logger.info(`⏳ Waiting ${waitTime}ms before retry...`);
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+
+        // Check connection again before retry
+        if (sock.ws && sock.ws.readyState !== 1) {
+          throw new AppError(
+            `Koneksi WhatsApp terputus selama pengiriman pesan. Silakan coba lagi.`,
+            503
+          );
+        }
+      }
+    }
   }
 
   // Save message status to database

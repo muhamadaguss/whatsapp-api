@@ -46,6 +46,7 @@ function checkSessionHealth(sock, sessionId, permissive = false) {
         break;
       case 3: // CLOSED
         health.issues.push("WebSocket is closed");
+        logger.warn(`🔌 WebSocket closed for session ${sessionId}, readyState: ${wsState}`);
         break;
       default:
         // For unknown states, check if we can still send messages
