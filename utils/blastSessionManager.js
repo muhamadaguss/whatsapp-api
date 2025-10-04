@@ -77,9 +77,10 @@ class BlastSessionManager {
   /**
    * Start blast session
    * @param {string} sessionId - Session ID
+   * @param {boolean} forceStart - Force start bypassing health checks
    * @returns {Object} - Start result
    */
-  async startSession(sessionId) {
+  async startSession(sessionId, forceStart = false) {
     try {
       const session = await BlastSession.findOne({ where: { sessionId } });
 
@@ -107,8 +108,9 @@ class BlastSessionManager {
       });
 
       // Start execution service
-      const blastExecutionService = require("../services/blastExecutionService");
-      await blastExecutionService.startExecution(sessionId);
+      const { BlastExecutionService } = require("../services/blastExecutionService");
+      const executionService = new BlastExecutionService();
+      await executionService.startExecution(sessionId, forceStart);
 
       logger.info(`🚀 Blast session started: ${sessionId}`);
 
@@ -142,8 +144,9 @@ class BlastSessionManager {
       }
 
       // Pause execution service first
-      const blastExecutionService = require("../services/blastExecutionService");
-      await blastExecutionService.pauseExecution(sessionId);
+      const { BlastExecutionService } = require("../services/blastExecutionService");
+      const executionService = new BlastExecutionService();
+      await executionService.pauseExecution(sessionId);
 
       // Update session status
       await session.update({
@@ -190,8 +193,9 @@ class BlastSessionManager {
       }
 
       // Resume execution service first
-      const blastExecutionService = require("../services/blastExecutionService");
-      await blastExecutionService.resumeExecution(sessionId);
+      const { BlastExecutionService } = require("../services/blastExecutionService");
+      const executionService = new BlastExecutionService();
+      await executionService.resumeExecution(sessionId);
 
       // Update session status
       await session.update({
@@ -246,8 +250,9 @@ class BlastSessionManager {
       }
 
       // Stop execution service first
-      const blastExecutionService = require("../services/blastExecutionService");
-      await blastExecutionService.stopExecution(sessionId);
+      const { BlastExecutionService } = require("../services/blastExecutionService");
+      const executionService = new BlastExecutionService();
+      await executionService.stopExecution(sessionId);
 
       // Update session status
       await session.update({
@@ -512,8 +517,8 @@ class BlastSessionManager {
         enabled: true,
         startHour: 8,
         endHour: 21,
-        excludeWeekends: true,
-        excludeLunchBreak: true,
+        excludeWeekends: false,
+        excludeLunchBreak: false,
         lunchStart: 12,
         lunchEnd: 13,
       },

@@ -148,7 +148,14 @@ async function startWhatsApp(sessionId, userId = null) {
 
   sessions[sessionId] = { sock, qr: null };
 
-  sock.ev.on("creds.update", saveCreds);
+  sock.ev.on("creds.update", (creds) => {
+    try {
+      saveCreds(creds);
+      logger.debug(`🔐 Credentials updated for session ${sessionId}`);
+    } catch (error) {
+      logger.error(`❌ Error saving credentials for session ${sessionId}:`, error);
+    }
+  });
   sock.ev.on("connection.update", (update) => {
     handleConnectionUpdate(update, sessionId, sock, userId, io).catch((err) => {
       logger.error(
@@ -1064,8 +1071,14 @@ async function handleDisconnect(lastDisconnect, sessionId, userId) {
       logger.error(`❌ Failed to reconnect session ${sessionId}:`, err);
     }
   } else if (DO_NOT_RECONNECT_REASONS.includes(statusCode)) {
-    logger.info(`❌ Session ${sessionId} requires logout/cleanup`);
-    cleanupSession(sessionId, userId);
+    // Special handling for banned/forbidden sessions
+    if (statusCode === DisconnectReason.forbidden) {
+      logger.error(`🚫 Session ${sessionId} has been banned/blocked by WhatsApp`);
+      await handleBannedSession(sessionId, userId);
+    } else {
+      logger.info(`❌ Session ${sessionId} requires logout/cleanup`);
+      cleanupSession(sessionId, userId);
+    }
   } else {
     logger.warn(
       `⚠️ Unknown disconnect reason for session ${sessionId}: ${statusCode}. Safe reconnect.`
@@ -1272,6 +1285,82 @@ async function getContactNameForSession(sessionId, jid) {
   } catch (error) {
     logger.error(`❌ Error getting contact name:`, error);
     return jid.split("@")[0]; // Fallback to phone number
+  }
+}
+
+// New function to handle banned/blocked sessions
+async function handleBannedSession(sessionId, userId) {
+  try {
+    logger.error(`🚫 Handling banned session: ${sessionId}`);
+
+    // Update database status to BANNED
+    await SessionModel.upsert({
+      sessionId,
+      status: "BANNED",
+      userId: userId,
+      errorMessage: "Session has been banned/blocked by WhatsApp",
+      errorCode: "SESSION_BANNED",
+      bannedAt: new Date()
+    });
+
+    // Stop any running blast operations for this session
+    const BlastExecutionService = require("../services/blastExecutionService");
+    try {
+      // Check if there are any running executions for this session
+      const executionState = BlastExecutionService.runningExecutions?.get(sessionId);
+      if (executionState) {
+        logger.info(`🛑 Stopping blast execution for banned session: ${sessionId}`);
+        executionState.isStopped = true;
+        executionState.stopReason = 'session_banned';
+
+        // Update blast session status
+        const BlastSession = require("../models/blastSessionModel");
+        await BlastSession.update(
+          {
+            status: 'ERROR',
+            errorMessage: 'Session banned during execution',
+            errorCode: 'SESSION_BANNED',
+            stoppedAt: new Date()
+          },
+          { where: { sessionId } }
+        );
+
+        // Clean up execution state
+        if (executionState.updateInterval) {
+          clearInterval(executionState.updateInterval);
+        }
+        delete BlastExecutionService.runningExecutions[sessionId];
+      }
+    } catch (blastError) {
+      logger.error(`❌ Error stopping blast execution for banned session:`, blastError);
+    }
+
+    // Emit notification to user
+    const io = getSocket();
+    if (io && userId) {
+      io.to(`user_${userId}`).emit("session_banned", {
+        sessionId,
+        message: "Your WhatsApp session has been banned/blocked",
+        reason: "Session banned by WhatsApp",
+        timestamp: new Date().toISOString()
+      });
+
+      logger.info(`📡 Emitted session_banned notification to user ${userId}`);
+    }
+
+    // Cleanup session files and memory
+    cleanupSession(sessionId, userId);
+
+    logger.info(`✅ Banned session ${sessionId} handled and cleaned up`);
+
+  } catch (error) {
+    logger.error(`❌ Error handling banned session ${sessionId}:`, error);
+    // Still attempt cleanup even if error occurs
+    try {
+      cleanupSession(sessionId, userId);
+    } catch (cleanupError) {
+      logger.error(`❌ Failed to cleanup banned session ${sessionId}:`, cleanupError);
+    }
   }
 }
 

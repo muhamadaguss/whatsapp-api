@@ -623,7 +623,11 @@ const startBlastSession = async (req, res) => {
       },
     });
   } catch (error) {
-    logger.error(`❌ Failed to start blast session ${sessionId}:`, error);
+    logger.error(`❌ Failed to start blast session ${sessionId}:`, {
+      error: error.message,
+      stack: error.stack,
+      name: error.name
+    });
     throw new AppError(`Failed to start blast session: ${error.message}`, 500);
   }
 };
@@ -1168,10 +1172,11 @@ const getSessionStats = async (req, res) => {
 };
 
 /**
- * Force start blast session (bypass business hours)
+ * Force start blast session (bypasses health checks)
  */
 const forceStartBlastSession = async (req, res) => {
   const { sessionId } = req.params;
+  const { skipPhoneValidation = false } = req.body; // Optional parameter
 
   try {
     // Verify session ownership
@@ -1183,21 +1188,100 @@ const forceStartBlastSession = async (req, res) => {
       throw new AppError("Blast session not found or access denied", 404);
     }
 
-    // Force start session (bypass business hours)
-    const result = await blastExecutionService.forceStartExecution(sessionId);
+    // 📱 VALIDATE PHONE NUMBERS FIRST (still validate phones even for force start)
+    let phoneValidationResult = null;
+    try {
+      phoneValidationResult = await validateSessionPhoneNumbers(
+        sessionId,
+        session.whatsappSessionId,
+        skipPhoneValidation
+      );
+
+      // If validation found invalid numbers, mark them as failed in database
+      if (!skipPhoneValidation && phoneValidationResult.invalidNumbers > 0) {
+        await markInvalidNumbersAsFailed(sessionId, phoneValidationResult.details);
+
+        // 🛡️ ADD DELAY to ensure database transaction is committed
+        logger.info(`⏳ Waiting 2 seconds to ensure database changes are committed...`);
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
+        logger.info(
+          `📱 Phone validation completed for force-start session ${sessionId}: ${phoneValidationResult.validNumbers}/${phoneValidationResult.totalMessages} valid numbers. ${phoneValidationResult.invalidNumbers} invalid numbers marked as failed.`
+        );
+      }
+
+    } catch (validationError) {
+      if (validationError instanceof AppError) {
+        throw validationError;
+      }
+      logger.warn(`Phone validation failed for force-start session ${sessionId}:`, validationError.message);
+      // Continue without validation if there's a technical error
+      phoneValidationResult = {
+        success: false,
+        message: `Phone validation failed: ${validationError.message}`,
+        totalMessages: 0,
+        validNumbers: 0,
+        invalidNumbers: 0
+      };
+    }
+
+    // Check business hours first (unless forced)
+    const businessHoursConfig = session.config?.businessHours;
+    logger.info(`[forceStartBlastSession] Session ${sessionId} businessHoursConfig: ${JSON.stringify(businessHoursConfig)}`);
+    const isWithinHours = blastExecutionService.isWithinBusinessHours(businessHoursConfig);
+    logger.info(`[forceStartBlastSession] Session ${sessionId} isWithinBusinessHours: ${isWithinHours}`);
+
+    let isPausedDueToBusinessHours = false; // Initialize flag
+
+    if (
+      businessHoursConfig &&
+      businessHoursConfig.enabled &&
+      !blastExecutionService.isWithinBusinessHours(businessHoursConfig)
+    ) {
+      logger.info(`Attempting to emit notification for force-start session ${sessionId} due to business hours.`);
+      getSocket().to(`user_${req.user.id}`).emit("notification", {
+        type: "warning",
+        message: `Blast session ${sessionId} will be paused until business hours (${businessHoursConfig.startHour}:00 - ${businessHoursConfig.endHour}:00).`,
+      });
+      logger.info(
+        `⏰ Notification emitted for force-start session ${sessionId}: Blast session will be paused due to business hours.`
+      );
+      isPausedDueToBusinessHours = true; // Set flag if condition met
+    }
+
+    // Force start session (bypasses health checks)
+    const result = await blastSessionManager.startSession(sessionId, true); // true = forceStart
 
     logger.info(
-      `🚀 Blast session force started by user ${req.user.id}: ${sessionId}`
+      `🚀 Blast session force-started by user ${req.user.id}: ${sessionId}`
     );
+
+    // Emit session update to user
+    await emitSessionUpdate(req.user.id);
+
+    // Prepare success message based on phone validation results
+    let successMessage = "Blast session force-started successfully (health checks bypassed)";
+    if (phoneValidationResult && phoneValidationResult.invalidNumbers > 0) {
+      successMessage = `Blast session force-started. ${phoneValidationResult.validNumbers}/${phoneValidationResult.totalMessages} numbers are valid. ${phoneValidationResult.invalidNumbers} invalid numbers marked as failed.`;
+    }
 
     res.json({
       success: true,
-      message: "Blast session force started successfully",
-      data: result,
+      message: successMessage,
+      data: {
+        ...result, // Include existing result data
+        isPausedDueToBusinessHours: isPausedDueToBusinessHours, // Add the new flag
+        phoneValidation: phoneValidationResult, // Include phone validation results
+        forceStarted: true, // Indicate this was a force start
+      },
     });
   } catch (error) {
-    logger.error(`❌ Failed to force start blast session ${sessionId}:`, error);
-    throw new AppError(`Failed to force start blast session: ${error.message}`, 500);
+    logger.error(`❌ Failed to force-start blast session ${sessionId}:`, {
+      error: error.message,
+      stack: error.stack,
+      name: error.name
+    });
+    throw new AppError(`Failed to force-start blast session: ${error.message}`, 500);
   }
 };
 
