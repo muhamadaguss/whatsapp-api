@@ -501,6 +501,181 @@ class AnalyticsService {
 
     return csvContent;
   }
+
+  /**
+   * Compare multiple campaigns (MongoDB version)
+   * @param {Array<string>} sessionIds - Array of MongoDB session IDs
+   * @returns {object} Comparison data
+   */
+  static async compareCampaignsMongo(sessionIds) {
+    try {
+      if (!Array.isArray(sessionIds) || sessionIds.length < 2) {
+        throw new Error('At least 2 campaigns required for comparison');
+      }
+
+      if (sessionIds.length > 5) {
+        throw new Error('Maximum 5 campaigns can be compared at once');
+      }
+
+      const campaigns = [];
+
+      for (const sessionId of sessionIds) {
+        const session = await BlastSession.findById(sessionId);
+        if (!session) continue;
+
+        const messages = await BlastMessage.find({ blastSessionId: sessionId });
+        
+        const total = messages.length;
+        const sent = messages.filter(m => m.status === 'sent').length;
+        const failed = messages.filter(m => m.status === 'failed').length;
+        const successRate = total > 0 ? (sent / total) * 100 : 0;
+
+        campaigns.push({
+          sessionId: sessionId.toString(),
+          name: session.name || 'Unnamed Campaign',
+          createdAt: session.createdAt,
+          metrics: {
+            total,
+            sent,
+            failed,
+            successRate: parseFloat(successRate.toFixed(2)),
+          },
+        });
+      }
+
+      // Find best campaign
+      const bestCampaign = campaigns.reduce((best, current) => {
+        return current.metrics.successRate > best.metrics.successRate ? current : best;
+      }, campaigns[0]);
+
+      return {
+        campaigns,
+        bestCampaign: bestCampaign.sessionId,
+        comparisonDate: new Date(),
+      };
+    } catch (error) {
+      logger.error('Error comparing campaigns:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Analyze best time to send based on historical MongoDB data
+   * @param {string} accountSessionId - WhatsApp session ID
+   * @param {number} days - Number of days to analyze
+   * @returns {object} Best time analysis
+   */
+  static async analyzeBestTimeMongo(accountSessionId, days = 30) {
+    try {
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - days);
+
+      const sessions = await BlastSession.find({
+        sessionId: accountSessionId,
+        createdAt: { $gte: startDate },
+      });
+
+      if (sessions.length === 0) {
+        return {
+          message: 'No historical data available',
+          recommendation: 'Send at least 5 campaigns to get personalized recommendations',
+        };
+      }
+
+      const sessionIds = sessions.map(s => s._id);
+      const messages = await BlastMessage.find({
+        blastSessionId: { $in: sessionIds },
+      });
+
+      // Hourly analysis
+      const hourlyData = {};
+      for (let i = 0; i < 24; i++) {
+        hourlyData[i] = { total: 0, sent: 0, failed: 0 };
+      }
+
+      messages.forEach(msg => {
+        if (msg.sentAt) {
+          const hour = new Date(msg.sentAt).getHours();
+          hourlyData[hour].total++;
+          if (msg.status === 'sent') hourlyData[hour].sent++;
+          if (msg.status === 'failed') hourlyData[hour].failed++;
+        }
+      });
+
+      const hourlyAnalysis = Object.entries(hourlyData).map(([hour, data]) => ({
+        hour: parseInt(hour),
+        total: data.total,
+        sent: data.sent,
+        successRate: data.total > 0 ? parseFloat(((data.sent / data.total) * 100).toFixed(2)) : 0,
+      }));
+
+      // Find best hours (minimum 20 messages)
+      const bestHours = hourlyAnalysis
+        .filter(h => h.total >= 20)
+        .sort((a, b) => b.successRate - a.successRate)
+        .slice(0, 5);
+
+      // Day of week analysis
+      const dayData = {};
+      for (let i = 0; i < 7; i++) {
+        dayData[i] = { total: 0, sent: 0 };
+      }
+
+      messages.forEach(msg => {
+        if (msg.sentAt) {
+          const day = new Date(msg.sentAt).getDay();
+          dayData[day].total++;
+          if (msg.status === 'sent') dayData[day].sent++;
+        }
+      });
+
+      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      const dayAnalysis = Object.entries(dayData).map(([day, data]) => ({
+        day: parseInt(day),
+        dayName: dayNames[day],
+        total: data.total,
+        successRate: data.total > 0 ? parseFloat(((data.sent / data.total) * 100).toFixed(2)) : 0,
+      }));
+
+      const bestDays = dayAnalysis
+        .filter(d => d.total >= 50)
+        .sort((a, b) => b.successRate - a.successRate)
+        .slice(0, 3);
+
+      // Recommendations
+      const recommendations = [];
+      if (bestHours.length > 0) {
+        recommendations.push({
+          type: 'best_hour',
+          message: `Best time: ${bestHours[0].hour}:00 - ${bestHours[0].hour + 1}:00`,
+          successRate: bestHours[0].successRate,
+        });
+      }
+
+      if (bestDays.length > 0) {
+        recommendations.push({
+          type: 'best_day',
+          message: `Best day: ${bestDays[0].dayName}`,
+          successRate: bestDays[0].successRate,
+        });
+      }
+
+      return {
+        accountSessionId,
+        daysAnalyzed: days,
+        totalMessages: messages.length,
+        hourlyAnalysis,
+        dayAnalysis,
+        bestHours,
+        bestDays,
+        recommendations,
+        generatedAt: new Date(),
+      };
+    } catch (error) {
+      logger.error('Error analyzing best time:', error);
+      throw error;
+    }
+  }
 }
 
 module.exports = AnalyticsService;

@@ -13,6 +13,11 @@ const {
   getSessionHealth,
 } = require("../controllers/whatsappController");
 
+const {
+  getAccountMetadata,
+  updateAccountCreationDate,
+} = require("../controllers/accountMetadataController");
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, "uploads/"); // pastikan folder ini ada
@@ -67,5 +72,9 @@ router.post("/logoutSession/:sessionId", verifyToken, logoutSession);
 router.get("/sessions", verifyToken, getActiveSessions);
 router.get("/contact-details/:sessionId/:jid", verifyToken, getContactDetails);
 router.get("/health/:sessionId", verifyToken, getSessionHealth);
+
+// Account metadata routes (Baileys → Database priority)
+router.get("/account/:sessionId/metadata", verifyToken, getAccountMetadata);
+router.post("/account/:sessionId/creation-date", verifyToken, updateAccountCreationDate);
 
 module.exports = router;

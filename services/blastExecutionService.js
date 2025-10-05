@@ -644,6 +644,123 @@ class BlastExecutionService {
           executionState.failedCount++;
         }
 
+        // ⏱️ APPLY CONTACT DELAY (delay antar kontak)
+        // Get contact delay config from session
+        const contactDelayConfig = session.config?.contactDelay;
+        if (contactDelayConfig && contactDelayConfig.min && contactDelayConfig.max) {
+          // Random delay between min and max (in seconds, convert to ms)
+          const minDelayMs = contactDelayConfig.min * 1000;
+          const maxDelayMs = contactDelayConfig.max * 1000;
+          const randomDelay = Math.floor(Math.random() * (maxDelayMs - minDelayMs + 1)) + minDelayMs;
+          
+          logger.info(`⏳ Applying contact delay: ${(randomDelay / 1000).toFixed(1)}s (range: ${contactDelayConfig.min}s-${contactDelayConfig.max}s)`);
+          await this.sleep(randomDelay);
+        }
+
+        // 🛑 CHECK REST THRESHOLD (istirahat setelah X pesan)
+        const restThresholdConfig = session.config?.restThreshold;
+        const restDelayConfig = session.config?.restDelay;
+        
+        if (restThresholdConfig && restDelayConfig) {
+          // Initialize rest counter if not exists
+          if (!executionState.messagesSinceLastRest) {
+            executionState.messagesSinceLastRest = 0;
+          }
+          
+          executionState.messagesSinceLastRest++;
+          
+          // Random threshold between min and max
+          const randomThreshold = Math.floor(
+            Math.random() * (restThresholdConfig.max - restThresholdConfig.min + 1)
+          ) + restThresholdConfig.min;
+          
+          if (executionState.messagesSinceLastRest >= randomThreshold) {
+            // Random rest delay between min and max (in minutes, convert to ms)
+            const minRestMs = restDelayConfig.min * 60 * 1000;
+            const maxRestMs = restDelayConfig.max * 60 * 1000;
+            const randomRestDelay = Math.floor(Math.random() * (maxRestMs - minRestMs + 1)) + minRestMs;
+            
+            logger.info(`😴 REST PERIOD: Sent ${executionState.messagesSinceLastRest} messages (threshold: ${randomThreshold}). Resting for ${(randomRestDelay / 60000).toFixed(1)} minutes...`);
+            
+            // Emit toast notification for rest period
+            _emitToastNotification(
+              "info",
+              "Rest Period",
+              `Campaign ${session.campaignName || sessionId} istirahat ${(randomRestDelay / 60000).toFixed(1)} menit setelah ${executionState.messagesSinceLastRest} pesan`,
+              sessionId
+            );
+            
+            await this.sleep(randomRestDelay);
+            
+            // Reset counter
+            executionState.messagesSinceLastRest = 0;
+            
+            logger.info(`✅ Rest period completed, resuming campaign...`);
+          }
+        }
+
+        // 📊 CHECK DAILY LIMIT (batas harian)
+        const dailyLimitConfig = session.config?.dailyLimit;
+        if (dailyLimitConfig) {
+          // Random daily limit between min and max
+          const randomDailyLimit = Math.floor(
+            Math.random() * (dailyLimitConfig.max - dailyLimitConfig.min + 1)
+          ) + dailyLimitConfig.min;
+          
+          if (executionState.successCount >= randomDailyLimit) {
+            logger.warn(`🛑 DAILY LIMIT REACHED: ${executionState.successCount}/${randomDailyLimit} messages sent today`);
+            
+            // Emit toast notification for daily limit
+            _emitToastNotification(
+              "warning",
+              "Daily Limit Reached",
+              `Campaign ${session.campaignName || sessionId} mencapai batas harian ${randomDailyLimit} pesan`,
+              sessionId
+            );
+            
+            // Pause execution until next day
+            executionState.isPaused = true;
+            await BlastSession.update(
+              { 
+                status: "PAUSED", 
+                pausedAt: new Date(),
+                pauseReason: `Daily limit reached (${randomDailyLimit} messages)`
+              },
+              { where: { sessionId } }
+            );
+            
+            _emitSessionsUpdate(sessionId);
+            
+            // Schedule resume for next day at start of business hours
+            const nextDay = new Date();
+            nextDay.setDate(nextDay.getDate() + 1);
+            nextDay.setHours(session.config?.businessHours?.startHour || 9, 0, 0, 0);
+            
+            const msUntilNextDay = nextDay.getTime() - Date.now();
+            logger.info(`⏰ Campaign will auto-resume tomorrow at ${nextDay.toLocaleString()}`);
+            
+            setTimeout(async () => {
+              try {
+                logger.info(`✅ Auto-resuming campaign ${sessionId} after daily limit reset`);
+                executionState.isPaused = false;
+                executionState.successCount = 0; // Reset daily counter
+                executionState.messagesSinceLastRest = 0; // Reset rest counter
+                
+                await BlastSession.update(
+                  { status: "RUNNING", resumedAt: new Date() },
+                  { where: { sessionId } }
+                );
+                
+                _emitSessionsUpdate(sessionId);
+              } catch (error) {
+                logger.error(`❌ Error auto-resuming after daily limit:`, error);
+              }
+            }, msUntilNextDay);
+            
+            continue; // Skip to next iteration (will pause due to isPaused flag)
+          }
+        }
+
         // Check if stopped during processing
         if (executionState.isStopped) {
           logger.info(`⏹️ Session ${sessionId} stopped during processing`);
