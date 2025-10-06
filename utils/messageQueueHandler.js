@@ -92,12 +92,70 @@ class MessageQueueHandler {
   }
 
   /**
+   * ========== PHASE 2: NON-SEQUENTIAL MESSAGE SHUFFLING ==========
+   * Shuffle array with Fisher-Yates algorithm for truly random order
+   * @param {Array} array - Array to shuffle
+   * @returns {Array} - Shuffled array
+   */
+  shuffleArray(array) {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+  }
+
+  /**
+   * Apply non-sequential ordering to messages
+   * 15-20% of messages will be sent out of order
+   * @param {Array} messages - Messages to reorder
+   * @returns {Array} - Reordered messages
+   */
+  applyNonSequentialOrder(messages) {
+    if (messages.length <= 1) return messages;
+
+    // Calculate how many to shuffle (15-20%)
+    const shufflePercentage = 0.15 + Math.random() * 0.05; // 15-20%
+    const shuffleCount = Math.floor(messages.length * shufflePercentage);
+    
+    if (shuffleCount === 0) return messages;
+
+    // Randomly select messages to shuffle
+    const toShuffle = [];
+    const indices = new Set();
+    
+    while (indices.size < shuffleCount) {
+      indices.add(Math.floor(Math.random() * messages.length));
+    }
+
+    // Extract messages to shuffle
+    const indicesArray = Array.from(indices).sort((a, b) => a - b);
+    for (const idx of indicesArray) {
+      toShuffle.push(messages[idx]);
+    }
+
+    // Shuffle them
+    const shuffled = this.shuffleArray(toShuffle);
+
+    // Put them back in different positions
+    let shuffledIdx = 0;
+    for (const idx of indicesArray) {
+      messages[idx] = shuffled[shuffledIdx++];
+    }
+
+    logger.info(`🔀 Shuffled ${shuffleCount}/${messages.length} messages (${(shufflePercentage * 100).toFixed(1)}%)`);
+    return messages;
+  }
+
+  /**
    * Get next batch of messages to process
    * @param {string} sessionId - Session ID
    * @param {number} batchSize - Number of messages to get
+   * @param {boolean} enableShuffle - Enable Phase 2 non-sequential order (default: true)
    * @returns {Array} - Array of prepared messages
    */
-  async getNextBatch(sessionId, batchSize = 10) {
+  async getNextBatch(sessionId, batchSize = 10, enableShuffle = true) {
     try {
       // Get pending messages
       logger.info(`🔍 Getting next batch of ${batchSize} messages for session ${sessionId}`);
@@ -125,6 +183,12 @@ class MessageQueueHandler {
         logger.info(`🔄 Found ${retryableMessages.length} retryable messages for session ${sessionId}`);
         messages = [...messages, ...retryableMessages];
       }
+
+      // ========== PHASE 2: APPLY NON-SEQUENTIAL ORDERING ==========
+      if (enableShuffle && messages.length > 1) {
+        messages = this.applyNonSequentialOrder(messages);
+      }
+      // ========== END PHASE 2 MODIFICATION ==========
 
       // Prepare all messages
       const preparedMessages = [];

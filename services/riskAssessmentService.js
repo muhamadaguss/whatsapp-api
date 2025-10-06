@@ -33,7 +33,7 @@ class RiskAssessmentService {
    */
   async calculateRiskAssessment(sessionId) {
     try {
-      const session = await BlastSession.findById(sessionId);
+      const session = await BlastSession.findOne({ where: { sessionId } });
       if (!session) {
         throw new Error(`Session ${sessionId} not found`);
       }

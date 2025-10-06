@@ -73,60 +73,64 @@ const validateSessionPhoneNumbers = async (sessionId, whatsappSessionId, skipVal
       };
     }
 
-    logger.info(`📱 Validating ${messages.length} phone numbers for session ${sessionId}`);
+    // ========== PHASE 1: SEQUENTIAL VALIDATION WITH HUMAN-LIKE DELAYS ==========
+    logger.info(`📱 Validating ${messages.length} phone numbers for session ${sessionId} (SEQUENTIAL MODE)`);
 
     const validationResults = [];
     let validCount = 0;
     let invalidCount = 0;
 
-    // Validate phone numbers in batches to avoid overwhelming WhatsApp API
-    const batchSize = 10;
-    for (let i = 0; i < messages.length; i += batchSize) {
-      const batch = messages.slice(i, i + batchSize);
+    // ⚠️ PHASE 1: CRITICAL CHANGE - Sequential validation instead of parallel batches
+    // Old approach: 10 parallel requests every 1s = spike pattern = bot detection
+    // New approach: 1 request per 3-5s = human-like checking = safer
+    
+    for (let i = 0; i < messages.length; i++) {
+      const message = messages[i];
       
-      // Process batch
-      const batchPromises = batch.map(async (message) => {
-        try {
-          const jid = `${message.phone}@s.whatsapp.net`;
-          const onWhatsAppResult = await sock.onWhatsApp(jid);
-          
-          const isValid = onWhatsAppResult && onWhatsAppResult.length > 0;
-          const result = {
-            phone: message.phone,
-            contactName: message.contactName,
-            isValid,
-            verifiedName: isValid ? onWhatsAppResult[0].verifiedName : null,
-            messageIndex: message.messageIndex
-          };
-
-          if (isValid) {
-            validCount++;
-          } else {
-            invalidCount++;
-          }
-
-          return result;
-        } catch (error) {
-          logger.warn(`Failed to validate ${message.phone}:`, error.message);
-          invalidCount++;
-          return {
-            phone: message.phone,
-            contactName: message.contactName,
-            isValid: false,
-            error: error.message,
-            messageIndex: message.messageIndex
-          };
+      try {
+        // Add human-like delay before each check (3-5 seconds)
+        if (i > 0) {
+          const randomDelay = 3000 + Math.random() * 2000; // 3-5s
+          await new Promise(resolve => setTimeout(resolve, randomDelay));
         }
-      });
 
-      const batchResults = await Promise.all(batchPromises);
-      validationResults.push(...batchResults);
+        const jid = `${message.phone}@s.whatsapp.net`;
+        const onWhatsAppResult = await sock.onWhatsApp(jid);
+        
+        const isValid = onWhatsAppResult && onWhatsAppResult.length > 0;
+        const result = {
+          phone: message.phone,
+          contactName: message.contactName,
+          isValid,
+          verifiedName: isValid ? onWhatsAppResult[0].verifiedName : null,
+          messageIndex: message.messageIndex
+        };
 
-      // Add small delay between batches
-      if (i + batchSize < messages.length) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        if (isValid) {
+          validCount++;
+        } else {
+          invalidCount++;
+        }
+
+        validationResults.push(result);
+        
+        // Log progress every 5 checks
+        if ((i + 1) % 5 === 0) {
+          logger.info(`📊 Validation progress: ${i + 1}/${messages.length} (Valid: ${validCount}, Invalid: ${invalidCount})`);
+        }
+      } catch (error) {
+        logger.warn(`Failed to validate ${message.phone}:`, error.message);
+        invalidCount++;
+        validationResults.push({
+          phone: message.phone,
+          contactName: message.contactName,
+          isValid: false,
+          error: error.message,
+          messageIndex: message.messageIndex
+        });
       }
     }
+    // ========== END PHASE 1 MODIFICATION ==========
 
     const successRate = messages.length > 0 ? (validCount / messages.length) * 100 : 0;
 
@@ -436,7 +440,8 @@ const createBlastSession = async (req, res) => {
     messageList,
     config = {},
     selectTarget,
-    inputNumbers
+    inputNumbers,
+    accountAge = 'NEW' // ⚠️ PHASE 1: Accept account age from request, default to ultra-safe NEW
   } = req.body;
 
   const filePath = req.file?.path; // Excel file path from multer
@@ -447,6 +452,12 @@ const createBlastSession = async (req, res) => {
       "Missing required fields: whatsappSessionId, messageTemplate",
       400
     );
+  }
+
+  // ⚠️ PHASE 1: Validate account age parameter
+  const validAccountAges = ['NEW', 'WARMING', 'ESTABLISHED'];
+  if (!validAccountAges.includes(accountAge)) {
+    logger.warn(`⚠️ Invalid accountAge '${accountAge}', defaulting to NEW`);
   }
 
   let finalMessageList = [];
@@ -473,6 +484,7 @@ const createBlastSession = async (req, res) => {
     }
 
     // Create blast session
+    // ⚠️ PHASE 1: Pass accountAge to get age-appropriate safety configuration
     const result = await blastSessionManager.createSession({
       userId: req.user.id,
       whatsappSessionId,
@@ -480,6 +492,7 @@ const createBlastSession = async (req, res) => {
       messageTemplate,
       messageList: finalMessageList,
       config,
+      accountAge, // ⚠️ PHASE 1: Critical parameter for ban prevention
     });
 
     logger.info(
@@ -536,42 +549,51 @@ const startBlastSession = async (req, res) => {
       throw new AppError("Blast session not found or access denied", 404);
     }
 
-    // 📱 VALIDATE PHONE NUMBERS FIRST
-    let phoneValidationResult = null;
-    try {
-      phoneValidationResult = await validateSessionPhoneNumbers(
-        sessionId, 
-        session.whatsappSessionId, 
-        skipPhoneValidation
-      );
-
-      // If validation found invalid numbers, mark them as failed in database
-      if (!skipPhoneValidation && phoneValidationResult.invalidNumbers > 0) {
-        await markInvalidNumbersAsFailed(sessionId, phoneValidationResult.details);
-        
-        // 🛡️ ADD DELAY to ensure database transaction is committed
-        logger.info(`⏳ Waiting 2 seconds to ensure database changes are committed...`);
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        logger.info(
-          `📱 Phone validation completed for session ${sessionId}: ${phoneValidationResult.validNumbers}/${phoneValidationResult.totalMessages} valid numbers. ${phoneValidationResult.invalidNumbers} invalid numbers marked as failed.`
-        );
-      }
-
-    } catch (validationError) {
-      if (validationError instanceof AppError) {
-        throw validationError;
-      }
-      logger.warn(`Phone validation failed for session ${sessionId}:`, validationError.message);
-      // Continue without validation if there's a technical error
-      phoneValidationResult = {
-        success: false,
-        message: `Phone validation failed: ${validationError.message}`,
-        totalMessages: 0,
-        validNumbers: 0,
-        invalidNumbers: 0
-      };
-    }
+    // � PHASE 1 FIX: DISABLE PRE-VALIDATION TO PREVENT DOUBLE API CALLS
+    // Pre-validation removed to eliminate bulk checking pattern
+    // Validation will be done in execution service (real-time, per message)
+    // This reduces API calls by 50% and removes automation signature
+    let phoneValidationResult = {
+      success: true,
+      message: "Pre-validation disabled (Phase 1 fix - prevents double API calls and bulk checking pattern)",
+      totalMessages: 0,
+      validNumbers: 0,
+      invalidNumbers: 0,
+      details: [],
+      note: "Validation will be performed in execution service during actual send"
+    };
+    
+    logger.info(`🚨 PHASE 1 FIX: Pre-validation disabled for session ${sessionId} to prevent ban-triggering patterns`);
+    
+    // ⚠️ ORIGINAL CODE COMMENTED OUT - DO NOT REMOVE (for reference & rollback)
+    // try {
+    //   phoneValidationResult = await validateSessionPhoneNumbers(
+    //     sessionId, 
+    //     session.whatsappSessionId, 
+    //     skipPhoneValidation
+    //   );
+    //   if (!skipPhoneValidation && phoneValidationResult.invalidNumbers > 0) {
+    //     await markInvalidNumbersAsFailed(sessionId, phoneValidationResult.details);
+    //     logger.info(`⏳ Waiting 2 seconds to ensure database changes are committed...`);
+    //     await new Promise(resolve => setTimeout(resolve, 2000));
+    //     logger.info(
+    //       `📱 Phone validation completed for session ${sessionId}: ${phoneValidationResult.validNumbers}/${phoneValidationResult.totalMessages} valid numbers. ${phoneValidationResult.invalidNumbers} invalid numbers marked as failed.`
+    //     );
+    //   }
+    // } catch (validationError) {
+    //   if (validationError instanceof AppError) {
+    //     throw validationError;
+    //   }
+    //   logger.warn(`Phone validation failed for session ${sessionId}:`, validationError.message);
+    //   phoneValidationResult = {
+    //     success: false,
+    //     message: `Phone validation failed: ${validationError.message}`,
+    //     totalMessages: 0,
+    //     validNumbers: 0,
+    //     invalidNumbers: 0
+    //   };
+    // }
+    // ⚠️ END OF COMMENTED CODE
 
     // Check if business hours are enabled and if current time is outside business hours
     const businessHoursConfig = session.config?.businessHours;

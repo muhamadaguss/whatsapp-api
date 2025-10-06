@@ -7,6 +7,9 @@ const BlastSession = require("../models/blastSessionModel");
 const BlastMessage = require("../models/blastMessageModel");
 const SpinTextEngine = require("../utils/spinTextEngine");
 const BlastRealTimeService = require("./blastRealTimeService");
+const emergencyMonitoringService = require("./emergencyMonitoringService"); // ⚠️ PHASE 1: Import emergency monitoring
+const { getAdaptiveDelayService } = require("./adaptiveDelayService"); // 🤖 PHASE 3 [P3-1]: ML-Based Adaptive Delays
+const { getRecoveryModeService } = require("./recoveryModeService"); // 🏥 PHASE 3 [P3-2]: Proactive Health & Recovery
 
 // Create singleton instance
 const blastRealTimeService = new BlastRealTimeService(); // Import real-time service
@@ -536,6 +539,58 @@ class BlastExecutionService {
         }
 
         // Get next batch of messages
+        // ========== PHASE 1: EMERGENCY HEALTH CHECK (BAN PREVENTION) ==========
+        // Check session health every 10 messages
+        if (executionState.processedCount > 0 && executionState.processedCount % 10 === 0) {
+          try {
+            const healthCheck = await emergencyMonitoringService.checkSessionHealth(sessionId);
+            
+            if (healthCheck.action === "AUTO_PAUSED") {
+              logger.error(`🚨 Session ${sessionId} was auto-paused due to high ban rate!`);
+              executionState.isStopped = true;
+              executionState.stopReason = "AUTO_PAUSED_HIGH_BAN_RATE";
+              break;
+            } else if (healthCheck.action === "ALERT") {
+              logger.warn(`⚠️ Session ${sessionId} has elevated ban rate: ${healthCheck.banRateStats.banRate}`);
+            }
+          } catch (healthError) {
+            logger.warn(`⚠️ Health check failed for ${sessionId}:`, healthError.message);
+          }
+        }
+        // ========== END PHASE 1 MODIFICATION ==========
+        
+        // ========== PHASE 3 [P3-2]: PROACTIVE HEALTH MONITORING & RECOVERY ==========
+        // Check if proactive throttling/pause needed based on health
+        if (executionState.processedCount > 0 && executionState.processedCount % 5 === 0) {
+          try {
+            const recoveryService = getRecoveryModeService();
+            const throttleDecision = await recoveryService.checkAndThrottle(sessionId);
+            
+            if (throttleDecision.shouldStop) {
+              logger.error(`🚨 [Recovery] Session ${sessionId} STOPPED due to critical health (${throttleDecision.healthScore})`);
+              executionState.isStopped = true;
+              executionState.stopReason = `HEALTH_CRITICAL_${throttleDecision.throttleLevel}`;
+              break;
+            }
+            
+            if (throttleDecision.shouldPause) {
+              logger.warn(`🏥 [Recovery] Proactive pause: ${throttleDecision.pauseDuration/1000}s for health ${throttleDecision.healthScore} (${throttleDecision.throttleLevel})`);
+              await this.sleep(throttleDecision.pauseDuration);
+            }
+            
+            // Apply recovery-adjusted config if in recovery mode
+            const recoveryInfo = recoveryService.isInRecoveryMode(sessionId);
+            if (recoveryInfo) {
+              logger.info(`🏥 [Recovery] Session in ${recoveryInfo.level} recovery mode (${recoveryInfo.throttleMultiplier}x slower)`);
+              session.config = await recoveryService.getRecoveryAdjustedConfig(sessionId, session.config);
+            }
+            
+          } catch (recoveryError) {
+            logger.warn(`⚠️ Recovery check failed for ${sessionId}:`, recoveryError.message);
+          }
+        }
+        // ========== END PHASE 3 [P3-2] ==========
+
         const messages = await messageQueueHandler.getNextBatch(sessionId, 1);
 
         if (messages.length === 0) {
@@ -563,29 +618,64 @@ class BlastExecutionService {
         const message = messages[0];
 
         try {
+          // ========== PHASE 1: DOUBLE VALIDATION DISABLED (BAN PREVENTION) ==========
           // 📱 DEFENSIVE VALIDATION: Double-check phone number before sending
-          logger.info(`🔍 Double-checking phone number availability: ${message.phone}`);
+          // ⚠️ DISABLED: This creates double validation pattern that WhatsApp detects as bot behavior
+          // Pre-validation already done in controller, this is redundant and risky
+          // logger.info(`🔍 Double-checking phone number availability: ${message.phone}`);
           
-          try {
-            const phoneCheck = await sock.onWhatsApp(message.phone);
-            if (!phoneCheck || !phoneCheck[0]?.exists) {
-              logger.warn(`❌ Phone ${message.phone} is not available on WhatsApp - marking as failed`);
-              await messageQueueHandler.markAsFailed(message.id, "Phone number not available on WhatsApp");
-              executionState.failedCount++;
-              executionState.processedCount++;
-              continue;
-            }
-            logger.info(`✅ Phone ${message.phone} confirmed available on WhatsApp`);
-          } catch (phoneCheckError) {
-            logger.warn(`⚠️ Phone validation error for ${message.phone}:`, phoneCheckError.message);
-            // Continue with sending if validation fails due to technical error
-          }
+          // try {
+          //   const phoneCheck = await sock.onWhatsApp(message.phone);
+          //   if (!phoneCheck || !phoneCheck[0]?.exists) {
+          //     logger.warn(`❌ Phone ${message.phone} is not available on WhatsApp - marking as failed`);
+          //     await messageQueueHandler.markAsFailed(message.id, "Phone number not available on WhatsApp");
+          //     executionState.failedCount++;
+          //     executionState.processedCount++;
+          //     continue;
+          //   }
+          //   logger.info(`✅ Phone ${message.phone} confirmed available on WhatsApp`);
+          // } catch (phoneCheckError) {
+          //   logger.warn(`⚠️ Phone validation error for ${message.phone}:`, phoneCheckError.message);
+          //   // Continue with sending if validation fails due to technical error
+          // }
+          // ========== END PHASE 1 MODIFICATION ==========
 
           // Mark as processing
           await messageQueueHandler.markAsProcessing(message.id);
 
           // Apply range management delays
           await this.applyRangeDelays(sessionId, executionState);
+
+          // ========== PHASE 2: LIGHTWEIGHT HUMAN BEHAVIOR SIMULATION ==========
+          // ⚡ OPTIMIZED: Removed long pauses (distraction, app-switch, long breaks)
+          // Only keep essential micro-delays that don't significantly slow down campaign
+          
+          // 1. Typing Simulation - Variable based on message length (ESSENTIAL)
+          const messageLength = message.messageTemplate?.length || 50;
+          let typingDelay;
+          if (messageLength < 50) {
+            typingDelay = 2000 + Math.random() * 3000; // 2-5s for short
+          } else if (messageLength < 150) {
+            typingDelay = 5000 + Math.random() * 5000; // 5-10s for medium
+          } else {
+            typingDelay = 10000 + Math.random() * 10000; // 10-20s for long
+          }
+          
+          logger.debug(`⌨️ Typing simulation: ${(typingDelay / 1000).toFixed(1)}s (length: ${messageLength})`);
+          await new Promise(resolve => setTimeout(resolve, typingDelay));
+
+          // 2. Random "Typo Correction" Pause (15% chance) - Micro delay (SAFE)
+          if (Math.random() < 0.15) {
+            const typoDelay = 1000 + Math.random() * 3000; // 1-4s
+            logger.debug(`✏️ Typo correction pause: ${(typoDelay / 1000).toFixed(1)}s`);
+            await new Promise(resolve => setTimeout(resolve, typoDelay));
+          }
+
+          // 3. Final micro-pause before send (human hesitation) - ESSENTIAL
+          const hesitationDelay = 500 + Math.random() * 1500; // 0.5-2s
+          await new Promise(resolve => setTimeout(resolve, hesitationDelay));
+          
+          // ========== END PHASE 2 MODIFICATION ==========
 
           // Send message
           const result = await this.sendMessage(sock, message);
@@ -621,6 +711,20 @@ class BlastExecutionService {
           executionState.processedCount++;
           executionState.currentIndex = message.messageIndex;
 
+          // ========== PHASE 2: LIGHTWEIGHT POST-SEND PAUSES ==========
+          // ⚡ OPTIMIZED: Reduced probabilities and durations
+          
+          // 5% chance: Quick read (5-15s) - REDUCED from 15% and 10-30s
+          if (Math.random() < 0.05) {
+            const readDelay = 5000 + Math.random() * 10000; // 5-15s
+            logger.info(`📖 Quick message check: ${(readDelay / 1000).toFixed(1)}s`);
+            await new Promise(resolve => setTimeout(resolve, readDelay));
+          }
+          
+          // NOTE: Removed "replying" pause (was 30-90s) - too long
+          // Main delay akan dari contactDelay config yang sudah optimal
+          // ========== END PHASE 2 MODIFICATION ==========
+
           // Update session progress
           await this.updateSessionProgress(sessionId, executionState);
 
@@ -645,9 +749,34 @@ class BlastExecutionService {
         }
 
         // ⏱️ APPLY CONTACT DELAY (delay antar kontak)
-        // Get contact delay config from session
-        const contactDelayConfig = session.config?.contactDelay;
+        // 🤖 PHASE 3 [P3-1]: Get adaptive delay based on real-time risk
+        let contactDelayConfig = session.config?.contactDelay;
+        
         if (contactDelayConfig && contactDelayConfig.min && contactDelayConfig.max) {
+          // try {
+          //   const adaptiveService = getAdaptiveDelayService();
+          //   const adaptiveDelay = await adaptiveService.getAdaptiveDelay(sessionId, {
+          //     min: contactDelayConfig.min,
+          //     max: contactDelayConfig.max
+          //   });
+            
+          //   // Use adaptive delay if available
+          //   if (adaptiveDelay && !adaptiveDelay.error) {
+          //     contactDelayConfig = { min: adaptiveDelay.min, max: adaptiveDelay.max };
+          //     logger.info(`🤖 [AdaptiveDelay] Adjusted: ${adaptiveDelay.original_min}-${adaptiveDelay.original_max}s → ${adaptiveDelay.min}-${adaptiveDelay.max}s (${adaptiveDelay.riskLevel}, ${adaptiveDelay.multiplier}x)`);
+              
+          //     // Check if dynamic throttle suggests pause
+          //     const throttle = await adaptiveService.getDynamicThrottle(sessionId);
+          //     if (throttle.shouldPause) {
+          //       logger.warn(`⚠️ [DynamicThrottle] Pausing for ${throttle.pauseDuration/1000}s due to ${throttle.reason}`);
+          //       await this.sleep(throttle.pauseDuration);
+          //     }
+          //   }
+          // } catch (adaptiveError) {
+          //   logger.error(`[AdaptiveDelay] Error, using base delay:`, adaptiveError.message);
+          //   // Continue with base delay
+          // }
+          
           // Random delay between min and max (in seconds, convert to ms)
           const minDelayMs = contactDelayConfig.min * 1000;
           const maxDelayMs = contactDelayConfig.max * 1000;
@@ -657,7 +786,11 @@ class BlastExecutionService {
           await this.sleep(randomDelay);
         }
 
-        // 🛑 CHECK REST THRESHOLD (istirahat setelah X pesan)
+        // ========== PHASE 2: REST PERIOD PATTERNS ==========
+        // ⚡ OPTIMIZED: Removed random coffee breaks (5-15min was too long)
+        // Only use configured rest threshold which is more predictable and controllable
+        
+        // 🛑 CHECK REST THRESHOLD (istirahat setelah X pesan) with VARIED PATTERNS
         const restThresholdConfig = session.config?.restThreshold;
         const restDelayConfig = session.config?.restDelay;
         
@@ -669,23 +802,37 @@ class BlastExecutionService {
           
           executionState.messagesSinceLastRest++;
           
-          // Random threshold between min and max
-          const randomThreshold = Math.floor(
-            Math.random() * (restThresholdConfig.max - restThresholdConfig.min + 1)
-          ) + restThresholdConfig.min;
+          // ⚠️ PHASE 2: WIDER threshold variance (30-120 instead of fixed range)
+          const minThreshold = Math.max(30, restThresholdConfig.min - 20);
+          const maxThreshold = Math.min(120, restThresholdConfig.max + 20);
+          const randomThreshold = Math.floor(Math.random() * (maxThreshold - minThreshold + 1)) + minThreshold;
           
           if (executionState.messagesSinceLastRest >= randomThreshold) {
-            // Random rest delay between min and max (in minutes, convert to ms)
-            const minRestMs = restDelayConfig.min * 60 * 1000;
-            const maxRestMs = restDelayConfig.max * 60 * 1000;
-            const randomRestDelay = Math.floor(Math.random() * (maxRestMs - minRestMs + 1)) + minRestMs;
+            // ⚠️ PHASE 2: MULTIPLE rest duration categories
+            const restCategory = Math.random();
+            let randomRestDelay;
+            let categoryName;
             
-            logger.info(`😴 REST PERIOD: Sent ${executionState.messagesSinceLastRest} messages (threshold: ${randomThreshold}). Resting for ${(randomRestDelay / 60000).toFixed(1)} minutes...`);
+            if (restCategory < 0.40) {
+              // SHORT rest (40% chance): 30-45 min
+              randomRestDelay = (30 + Math.random() * 15) * 60 * 1000;
+              categoryName = "SHORT";
+            } else if (restCategory < 0.80) {
+              // MEDIUM rest (40% chance): 45-90 min
+              randomRestDelay = (45 + Math.random() * 45) * 60 * 1000;
+              categoryName = "MEDIUM";
+            } else {
+              // LONG rest (20% chance): 90-180 min
+              randomRestDelay = (90 + Math.random() * 90) * 60 * 1000;
+              categoryName = "LONG";
+            }
+            
+            logger.info(`😴 REST PERIOD (${categoryName}): Sent ${executionState.messagesSinceLastRest} messages (threshold: ${randomThreshold}). Resting for ${(randomRestDelay / 60000).toFixed(1)} minutes...`);
             
             // Emit toast notification for rest period
             _emitToastNotification(
               "info",
-              "Rest Period",
+              `${categoryName} Rest Period`,
               `Campaign ${session.campaignName || sessionId} istirahat ${(randomRestDelay / 60000).toFixed(1)} menit setelah ${executionState.messagesSinceLastRest} pesan`,
               sessionId
             );
@@ -695,9 +842,10 @@ class BlastExecutionService {
             // Reset counter
             executionState.messagesSinceLastRest = 0;
             
-            logger.info(`✅ Rest period completed, resuming campaign...`);
+            logger.info(`✅ ${categoryName} rest period completed, resuming campaign...`);
           }
         }
+        // ========== END PHASE 2 MODIFICATION ==========
 
         // 📊 CHECK DAILY LIMIT (batas harian)
         const dailyLimitConfig = session.config?.dailyLimit;

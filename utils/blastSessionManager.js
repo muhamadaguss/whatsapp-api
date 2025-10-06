@@ -14,7 +14,9 @@ class BlastSessionManager {
 
   /**
    * Create new blast session
+   * ========== PHASE 1: ACCOUNT AGE-BASED CONFIGURATION ==========
    * @param {Object} params - Session parameters
+   * @param {string} params.accountAge - Account age: 'NEW', 'WARMING', 'ESTABLISHED'
    * @returns {Object} - Created session
    */
   async createSession({
@@ -24,12 +26,22 @@ class BlastSessionManager {
     messageTemplate,
     messageList,
     config = {},
+    accountAge = 'NEW', // ⚠️ PHASE 1: Default to ultra-safe NEW mode
   }) {
     const sessionId = `blast_${Date.now()}_${Math.random()
       .toString(36)
       .substring(7)}`;
 
     try {
+      // ⚠️ PHASE 1: Get age-based default config
+      const ageBasedConfig = this.getDefaultConfig(accountAge);
+      
+      logger.info(`📊 Creating session with accountAge: ${accountAge}`, {
+        contactDelay: ageBasedConfig.contactDelay,
+        dailyLimit: ageBasedConfig.dailyLimit,
+        restDelay: ageBasedConfig.restDelay,
+      });
+
       // Create session record
       const session = await BlastSession.create({
         sessionId,
@@ -40,8 +52,8 @@ class BlastSessionManager {
         totalMessages: messageList.length,
         status: "IDLE",
         config: {
-          ...this.getDefaultConfig(),
-          ...config,
+          ...ageBasedConfig, // ⚠️ PHASE 1: Use age-based config as base
+          ...config,         // User overrides can still apply
         },
       });
 
@@ -503,22 +515,52 @@ class BlastSessionManager {
   }
 
   /**
-   * Get default configuration
-   * @returns {Object} - Default config
+   * Get default configuration with account age-based safety settings
+   * ========== PHASE 1: ACCOUNT AGE-BASED DELAYS (BAN PREVENTION) ==========
+   * @param {string} accountAge - Age category: 'NEW' (0-7 days), 'WARMING' (8-30 days), 'ESTABLISHED' (30+ days)
+   * @returns {Object} - Default config optimized for account age
    */
-  getDefaultConfig() {
+  getDefaultConfig(accountAge = 'NEW') {
+    // Define age-based configurations to mimic human behavior patterns
+    const ageConfigs = {
+      NEW: {
+        // ULTRA-SAFE: For accounts 0-7 days old
+        contactDelay: { min: 90, max: 300 },    // 1.5-5 minutes (was 30-120s = TOO FAST)
+        dailyLimit: { min: 40, max: 60 },       // 40-60 messages (was 200-300 = DANGEROUS)
+        restDelay: { min: 60, max: 120 },       // 1-2 hours rest (was 10-30min = TOO SHORT)
+        restThreshold: { min: 15, max: 25 },    // Rest after 15-25 messages
+      },
+      WARMING: {
+        // MODERATE-SAFE: For accounts 8-30 days old
+        contactDelay: { min: 60, max: 180 },    // 1-3 minutes (was 30-120s)
+        dailyLimit: { min: 80, max: 120 },      // 80-120 messages (was 200-300)
+        restDelay: { min: 45, max: 90 },        // 45-90 minutes rest (was 10-30min)
+        restThreshold: { min: 25, max: 40 },    // Rest after 25-40 messages
+      },
+      ESTABLISHED: {
+        // BALANCED: For accounts 30+ days old
+        contactDelay: { min: 45, max: 150 },    // 45s-2.5min (was 30-120s)
+        dailyLimit: { min: 150, max: 200 },     // 150-200 messages (was 200-300)
+        restDelay: { min: 30, max: 60 },        // 30-60 minutes rest (was 10-30min)
+        restThreshold: { min: 40, max: 60 },    // Rest after 40-60 messages
+      },
+    };
+
+    // Validate and get config for account age
+    const selectedConfig = ageConfigs[accountAge] || ageConfigs.NEW;
+
     return {
-      messageDelay: { min: 2, max: 10 }, // seconds
-      contactDelay: { min: 30, max: 120 }, // seconds
-      restDelay: { min: 10, max: 30 }, // minutes
-      dailyLimit: { min: 200, max: 300 }, // messages
-      restThreshold: { min: 50, max: 100 }, // messages
+      messageDelay: { min: 2, max: 10 }, // seconds between API calls (keep existing)
+      contactDelay: selectedConfig.contactDelay, // ⚠️ CRITICAL: Age-based human-like delays
+      restDelay: selectedConfig.restDelay,       // ⚠️ CRITICAL: Longer recovery periods
+      dailyLimit: selectedConfig.dailyLimit,     // ⚠️ CRITICAL: Conservative message limits
+      restThreshold: selectedConfig.restThreshold, // When to trigger rest
       businessHours: {
         enabled: true,
-        startHour: 8,
-        endHour: 21,
-        excludeWeekends: false,
-        excludeLunchBreak: false,
+        startHour: 9,           // ⚠️ PHASE 1: Changed from 8 to 9 (realistic work hours)
+        endHour: 17,            // ⚠️ PHASE 1: Changed from 21 to 17 (5PM, not 9PM!)
+        excludeWeekends: true,  // ⚠️ PHASE 1: Changed from false (humans rest on weekends)
+        excludeLunchBreak: true, // ⚠️ PHASE 1: Changed from false (humans take lunch)
         lunchStart: 12,
         lunchEnd: 13,
       },
@@ -526,6 +568,8 @@ class BlastSessionManager {
         maxRetries: 3,
         retryDelay: 60, // seconds
       },
+      // Store account age for logging/monitoring
+      accountAge: accountAge,
     };
   }
 
