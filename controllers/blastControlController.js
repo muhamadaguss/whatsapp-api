@@ -907,8 +907,8 @@ const getUserBlastSessions = async (req, res) => {
       offset: parseInt(offset),
     });
 
-    // Transform data untuk include WhatsApp account information
-    const transformedSessions = sessions.map(session => {
+    // Transform data untuk include WhatsApp account information and next message info
+    const transformedSessions = await Promise.all(sessions.map(async (session) => {
       const sessionData = session.toJSON();
       
       // Extract WhatsApp account information
@@ -937,11 +937,25 @@ const getUserBlastSessions = async (req, res) => {
         };
       }
 
+      // ⏱️ Get next message timing info for RUNNING sessions
+      if (sessionData.status === 'RUNNING') {
+        try {
+          const nextMessageInfo = await blastExecutionService.getNextMessageInfo(sessionData.sessionId);
+          sessionData.nextMessageInfo = nextMessageInfo;
+          logger.info(`✅ Got next message info for ${sessionData.sessionId}:`, nextMessageInfo);
+        } catch (error) {
+          logger.error(`❌ Failed to get next message info for ${sessionData.sessionId}:`, error);
+          sessionData.nextMessageInfo = null;
+        }
+      } else {
+        sessionData.nextMessageInfo = null;
+      }
+
       // Remove the nested whatsappSession object
       delete sessionData.whatsappSession;
       
       return sessionData;
-    });
+    }));
 
     res.json({
       success: true,

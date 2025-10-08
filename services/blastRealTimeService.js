@@ -343,7 +343,7 @@ class BlastRealTimeService {
         });
 
         // Calculate progress for each session and transform whatsappSession to whatsappAccount
-        const sessionsWithProgress = userSessions.map(session => {
+        const sessionsWithProgress = await Promise.all(userSessions.map(async (session) => {
           const sessionData = {
             ...session.toJSON(),
             progressPercentage: this.calculateProgressPercentage(session),
@@ -377,11 +377,26 @@ class BlastRealTimeService {
             };
           }
 
+          // ⏱️ Get next message timing info for RUNNING sessions
+          if (sessionData.status === 'RUNNING') {
+            try {
+              const blastExecutionService = require('./blastExecutionService');
+              const nextMessageInfo = await blastExecutionService.getNextMessageInfo(sessionData.sessionId);
+              sessionData.nextMessageInfo = nextMessageInfo;
+              logger.debug(`✅ Got next message info for ${sessionData.sessionId} in socket emission`);
+            } catch (error) {
+              logger.error(`❌ Failed to get next message info for ${sessionData.sessionId} in socket:`, error);
+              sessionData.nextMessageInfo = null;
+            }
+          } else {
+            sessionData.nextMessageInfo = null;
+          }
+
           // Remove the nested whatsappSession object
           delete sessionData.whatsappSession;
           
           return sessionData;
-        });
+        }));
 
         socket.to(`user_${userId}`).emit("sessions-update", sessionsWithProgress);
         logger.debug(`📡 Emitted sessions update to user ${userId}: ${sessionsWithProgress.length} sessions`);

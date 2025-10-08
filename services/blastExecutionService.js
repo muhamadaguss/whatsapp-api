@@ -210,14 +210,18 @@ const _emitToastNotification = (type, title, description, sessionId = null, user
   }
 };
 
+// Global Maps to store execution state (shared across all instances)
+const runningExecutions = new Map(); // sessionId -> execution state
+const businessHoursTimers = new Map(); // sessionId -> timer for auto-resume
+
 /**
  * Blast Execution Service
  * Handles the actual execution of blast sessions with pause/resume/stop support
  */
 class BlastExecutionService {
   constructor() {
-    this.runningExecutions = new Map(); // sessionId -> execution state
-    this.businessHoursTimers = new Map(); // sessionId -> timer for auto-resume
+    this.runningExecutions = runningExecutions; // Use shared global Map
+    this.businessHoursTimers = businessHoursTimers; // Use shared global Map
 
     // Note: Auto-resume scheduler will be initialized when the service is first used
     // this.initializeAutoResumeScheduler();
@@ -643,39 +647,23 @@ class BlastExecutionService {
           // Mark as processing
           await messageQueueHandler.markAsProcessing(message.id);
 
-          // Apply range management delays
-          await this.applyRangeDelays(sessionId, executionState);
-
-          // ========== PHASE 2: LIGHTWEIGHT HUMAN BEHAVIOR SIMULATION ==========
-          // ⚡ OPTIMIZED: Removed long pauses (distraction, app-switch, long breaks)
-          // Only keep essential micro-delays that don't significantly slow down campaign
+          // 🚀 CHECK IF THIS IS THE FIRST MESSAGE - Skip message delay for immediate start
+          const isFirstMessage = executionState.processedCount === 0;
           
-          // 1. Typing Simulation - Variable based on message length (ESSENTIAL)
-          const messageLength = message.messageTemplate?.length || 50;
-          let typingDelay;
-          if (messageLength < 50) {
-            typingDelay = 2000 + Math.random() * 3000; // 2-5s for short
-          } else if (messageLength < 150) {
-            typingDelay = 5000 + Math.random() * 5000; // 5-10s for medium
+          if (isFirstMessage) {
+            logger.info(`🚀 First message - sending immediately without delays!`);
           } else {
-            typingDelay = 10000 + Math.random() * 10000; // 10-20s for long
+            // ⏱️ APPLY MESSAGE DELAY (delay sebelum kirim pesan)
+            const messageDelayConfig = session.config?.messageDelay;
+            if (messageDelayConfig && messageDelayConfig.min && messageDelayConfig.max) {
+              const minDelayMs = messageDelayConfig.min * 1000;
+              const maxDelayMs = messageDelayConfig.max * 1000;
+              const randomDelay = Math.floor(Math.random() * (maxDelayMs - minDelayMs + 1)) + minDelayMs;
+              
+              logger.info(`⏳ Applying message delay: ${(randomDelay / 1000).toFixed(1)}s (range: ${messageDelayConfig.min}s-${messageDelayConfig.max}s)`);
+              await this.sleep(randomDelay);
+            }
           }
-          
-          logger.debug(`⌨️ Typing simulation: ${(typingDelay / 1000).toFixed(1)}s (length: ${messageLength})`);
-          await new Promise(resolve => setTimeout(resolve, typingDelay));
-
-          // 2. Random "Typo Correction" Pause (15% chance) - Micro delay (SAFE)
-          if (Math.random() < 0.15) {
-            const typoDelay = 1000 + Math.random() * 3000; // 1-4s
-            logger.debug(`✏️ Typo correction pause: ${(typoDelay / 1000).toFixed(1)}s`);
-            await new Promise(resolve => setTimeout(resolve, typoDelay));
-          }
-
-          // 3. Final micro-pause before send (human hesitation) - ESSENTIAL
-          const hesitationDelay = 500 + Math.random() * 1500; // 0.5-2s
-          await new Promise(resolve => setTimeout(resolve, hesitationDelay));
-          
-          // ========== END PHASE 2 MODIFICATION ==========
 
           // Send message
           const result = await this.sendMessage(sock, message);
@@ -684,6 +672,12 @@ class BlastExecutionService {
             // Mark as sent
             await messageQueueHandler.markAsSent(message.id, result.messageId);
             executionState.successCount++;
+            
+            // ⏱️ Track last message sent time for next message estimation
+            executionState.lastMessageSentAt = new Date();
+            executionState.lastMessagePhone = message.phone;
+            executionState.lastMessageContact = message.contactName || message.phone;
+            
             logger.info(`✅ Message sent successfully: ${message.phone}`);
           } else {
             // Check if this is a session-level error that should stop execution
@@ -710,20 +704,6 @@ class BlastExecutionService {
 
           executionState.processedCount++;
           executionState.currentIndex = message.messageIndex;
-
-          // ========== PHASE 2: LIGHTWEIGHT POST-SEND PAUSES ==========
-          // ⚡ OPTIMIZED: Reduced probabilities and durations
-          
-          // 5% chance: Quick read (5-15s) - REDUCED from 15% and 10-30s
-          if (Math.random() < 0.05) {
-            const readDelay = 5000 + Math.random() * 10000; // 5-15s
-            logger.info(`📖 Quick message check: ${(readDelay / 1000).toFixed(1)}s`);
-            await new Promise(resolve => setTimeout(resolve, readDelay));
-          }
-          
-          // NOTE: Removed "replying" pause (was 30-90s) - too long
-          // Main delay akan dari contactDelay config yang sudah optimal
-          // ========== END PHASE 2 MODIFICATION ==========
 
           // Update session progress
           await this.updateSessionProgress(sessionId, executionState);
@@ -752,7 +732,14 @@ class BlastExecutionService {
         // 🤖 PHASE 3 [P3-1]: Get adaptive delay based on real-time risk
         let contactDelayConfig = session.config?.contactDelay;
         
-        if (contactDelayConfig && contactDelayConfig.min && contactDelayConfig.max) {
+        // 🚀 CHECK IF THIS IS THE LAST MESSAGE - Skip delay if last message was successful
+        const queueStatsAfterSend = await messageQueueHandler.getQueueStats(sessionId);
+        const isLastMessage = queueStatsAfterSend.remaining === 0;
+        
+        if (isLastMessage) {
+          logger.info(`🎉 Last message sent successfully! Skipping contact delay and completing session...`);
+          // Don't apply delay for last message, let it complete immediately
+        } else if (contactDelayConfig && contactDelayConfig.min && contactDelayConfig.max) {
           // try {
           //   const adaptiveService = getAdaptiveDelayService();
           //   const adaptiveDelay = await adaptiveService.getAdaptiveDelay(sessionId, {
@@ -782,15 +769,29 @@ class BlastExecutionService {
           const maxDelayMs = contactDelayConfig.max * 1000;
           const randomDelay = Math.floor(Math.random() * (maxDelayMs - minDelayMs + 1)) + minDelayMs;
           
+          // ⏱️ Track next contact delay for estimation
+          executionState.nextContactDelay = randomDelay;
+          executionState.nextContactDelayEndsAt = new Date(Date.now() + randomDelay);
+          
           logger.info(`⏳ Applying contact delay: ${(randomDelay / 1000).toFixed(1)}s (range: ${contactDelayConfig.min}s-${contactDelayConfig.max}s)`);
           await this.sleep(randomDelay);
+          
+          // Clear delay tracking after sleep completes
+          executionState.nextContactDelay = null;
+          executionState.nextContactDelayEndsAt = null;
         }
 
         // ========== PHASE 2: REST PERIOD PATTERNS ==========
         // ⚡ OPTIMIZED: Removed random coffee breaks (5-15min was too long)
         // Only use configured rest threshold which is more predictable and controllable
         
-        // 🛑 CHECK REST THRESHOLD (istirahat setelah X pesan) with VARIED PATTERNS
+        // � Skip rest period and daily limit checks if this was the last message
+        if (isLastMessage) {
+          logger.info(`✅ Skipping rest period and daily limit checks - campaign completing...`);
+          continue; // Skip to loop end, will break naturally
+        }
+        
+        // �🛑 CHECK REST THRESHOLD (istirahat setelah X pesan) with VARIED PATTERNS
         const restThresholdConfig = session.config?.restThreshold;
         const restDelayConfig = session.config?.restDelay;
         
@@ -1549,7 +1550,104 @@ class BlastExecutionService {
       // Don't throw error to avoid breaking the execution flow
     }
   }
+
+  /**
+   * Get execution state for a session (for next message estimation)
+   * @param {string} sessionId - Session ID
+   * @returns {Object|null} - Execution state or null if not running
+   */
+  getExecutionState(sessionId) {
+    return this.runningExecutions.get(sessionId) || null;
+  }
+
+  /**
+   * Get next message estimation info
+   * @param {string} sessionId - Session ID
+   * @returns {Object} - Next message timing info
+   */
+  async getNextMessageInfo(sessionId) {
+    try {
+      logger.debug(`🔍 Getting next message info for ${sessionId}`);
+      const executionState = this.getExecutionState(sessionId);
+      const session = await BlastSession.findOne({ where: { sessionId } });
+      
+      if (!session) {
+        logger.debug(`❌ Session not found: ${sessionId}`);
+        return null;
+      }
+
+      logger.debug(`📊 Session ${sessionId} status: ${session.status}, hasExecutionState: ${!!executionState}`);
+
+      // If session is not running, no next message info
+      if (!executionState || session.status !== 'RUNNING') {
+        return {
+          isRunning: false,
+          status: session.status,
+          nextMessageIn: null,
+          nextSendAt: null,
+          nextContact: null
+        };
+      }
+
+      // Get next pending message
+      const nextMessage = await BlastMessage.findOne({
+        where: {
+          sessionId,
+          status: 'pending'
+        },
+        order: [['messageIndex', 'ASC']],
+        limit: 1
+      });
+
+      let nextMessageIn = null;
+      let nextSendAt = null;
+
+      // If currently in delay period, use the tracked delay end time
+      if (executionState.nextContactDelayEndsAt) {
+        const now = new Date();
+        const delayEndsAt = new Date(executionState.nextContactDelayEndsAt);
+        nextMessageIn = Math.max(0, Math.floor((delayEndsAt - now) / 1000)); // seconds
+        nextSendAt = delayEndsAt;
+      } else if (executionState.lastMessageSentAt) {
+        // Estimate based on average contactDelay config
+        const contactDelay = session.config?.contactDelay;
+        if (contactDelay) {
+          const avgDelay = (contactDelay.min + contactDelay.max) / 2;
+          const lastSentTime = new Date(executionState.lastMessageSentAt);
+          const estimatedNextSend = new Date(lastSentTime.getTime() + (avgDelay * 1000));
+          const now = new Date();
+          nextMessageIn = Math.max(0, Math.floor((estimatedNextSend - now) / 1000));
+          nextSendAt = estimatedNextSend;
+        }
+      }
+
+      const result = {
+        isRunning: true,
+        status: session.status,
+        nextMessageIn, // seconds until next send
+        nextSendAt: nextSendAt ? nextSendAt.toISOString() : null, // ISO string format
+        nextContact: nextMessage ? {
+          phone: nextMessage.phone,
+          name: nextMessage.contactName || nextMessage.phone,
+          index: nextMessage.messageIndex
+        } : null,
+        lastMessageSentAt: executionState.lastMessageSentAt,
+        lastMessagePhone: executionState.lastMessagePhone,
+        lastMessageContact: executionState.lastMessageContact
+      };
+      
+      logger.debug(`✅ Next message info for ${sessionId}:`, JSON.stringify(result, null, 2));
+      return result;
+    } catch (error) {
+      logger.error(`❌ Failed to get next message info for ${sessionId}:`, error.message);
+      logger.error(`Stack trace:`, error.stack);
+      return null;
+    }
+  }
 }
+
+// Create singleton instance for shared state access
+const serviceInstance = new BlastExecutionService();
 
 module.exports = {
   _emitSessionsUpdate,
@@ -1566,5 +1664,8 @@ module.exports = {
   stopExecution: BlastExecutionService.prototype.stopExecution,
   updateSessionProgress: BlastExecutionService.prototype.updateSessionProgress,
   handleExecutionError: BlastExecutionService.prototype.handleExecutionError,
-  completeExecution: BlastExecutionService.prototype.completeExecution
+  completeExecution: BlastExecutionService.prototype.completeExecution,
+  // Use bound methods from singleton instance for state-dependent methods
+  getExecutionState: serviceInstance.getExecutionState.bind(serviceInstance),
+  getNextMessageInfo: serviceInstance.getNextMessageInfo.bind(serviceInstance)
 };
