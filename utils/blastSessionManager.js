@@ -42,6 +42,17 @@ class BlastSessionManager {
         restDelay: ageBasedConfig.restDelay,
       });
 
+      // ⚠️ FIX: Deep merge config to properly override nested objects
+      // User config should take priority over age-based defaults
+      const mergedConfig = this.deepMergeConfig(ageBasedConfig, config);
+      
+      logger.info(`📊 User config applied:`, {
+        userContactDelay: config.contactDelay,
+        finalContactDelay: mergedConfig.contactDelay,
+        userDailyLimit: config.dailyLimit,
+        finalDailyLimit: mergedConfig.dailyLimit,
+      });
+
       // Create session record
       const session = await BlastSession.create({
         sessionId,
@@ -51,10 +62,7 @@ class BlastSessionManager {
         messageTemplate,
         totalMessages: messageList.length,
         status: "IDLE",
-        config: {
-          ...ageBasedConfig, // ⚠️ PHASE 1: Use age-based config as base
-          ...config,         // User overrides can still apply
-        },
+        config: mergedConfig,
       });
 
       // Create message records
@@ -512,6 +520,36 @@ class BlastSessionManager {
       logger.error(`❌ Failed to recover active sessions:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Deep merge configuration objects
+   * User config takes priority over default config for nested objects
+   * @param {Object} defaultConfig - Default configuration
+   * @param {Object} userConfig - User-provided configuration
+   * @returns {Object} - Merged configuration
+   */
+  deepMergeConfig(defaultConfig, userConfig) {
+    const merged = { ...defaultConfig };
+    
+    for (const key in userConfig) {
+      if (userConfig[key] !== undefined && userConfig[key] !== null) {
+        // If both are objects (but not arrays), merge them recursively
+        if (
+          typeof userConfig[key] === 'object' && 
+          !Array.isArray(userConfig[key]) &&
+          typeof defaultConfig[key] === 'object' &&
+          !Array.isArray(defaultConfig[key])
+        ) {
+          merged[key] = { ...defaultConfig[key], ...userConfig[key] };
+        } else {
+          // Otherwise, user config takes priority
+          merged[key] = userConfig[key];
+        }
+      }
+    }
+    
+    return merged;
   }
 
   /**
