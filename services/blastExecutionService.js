@@ -7,9 +7,10 @@ const BlastSession = require("../models/blastSessionModel");
 const BlastMessage = require("../models/blastMessageModel");
 const SpinTextEngine = require("../utils/spinTextEngine");
 const BlastRealTimeService = require("./blastRealTimeService");
-const emergencyMonitoringService = require("./emergencyMonitoringService"); // ⚠️ PHASE 1: Import emergency monitoring
-const { getAdaptiveDelayService } = require("./adaptiveDelayService"); // 🤖 PHASE 3 [P3-1]: ML-Based Adaptive Delays
-const { getRecoveryModeService } = require("./recoveryModeService"); // 🏥 PHASE 3 [P3-2]: Proactive Health & Recovery
+// ❌ PHASE 1 DAY 1: Remove complex timing systems
+// const emergencyMonitoringService = require("./emergencyMonitoringService");
+// const { getAdaptiveDelayService } = require("./adaptiveDelayService");
+// const { getRecoveryModeService } = require("./recoveryModeService");
 
 // Create singleton instance
 const blastRealTimeService = new BlastRealTimeService(); // Import real-time service
@@ -210,6 +211,47 @@ const _emitToastNotification = (type, title, description, sessionId = null, user
   }
 };
 
+/**
+ * Emit real-time progress update from memory (no DB query needed)
+ * This is much faster than _emitSessionsUpdate which queries database
+ */
+const _emitProgressUpdate = async (sessionId, executionState, userId) => {
+  try {
+    const socket = getSocket();
+    if (!socket) {
+      logger.warn("⚠️ Socket not available for progress update");
+      return;
+    }
+
+    // Calculate progress from memory
+    const totalMessages = executionState.totalMessages || 1;
+    const progressPercentage = totalMessages > 0
+      ? Math.min((executionState.processedCount / totalMessages) * 100, 100)
+      : 0;
+
+    // Prepare real-time progress data from memory (no DB query!)
+    const progressData = {
+      sessionId,
+      sentCount: executionState.successCount || 0,
+      failedCount: executionState.failedCount || 0,
+      skippedCount: executionState.skippedCount || 0,
+      totalMessages: executionState.totalMessages || 0,
+      processedCount: executionState.processedCount || 0,
+      currentIndex: executionState.currentIndex || 0,
+      progressPercentage: progressPercentage.toFixed(2),
+      remainingCount: totalMessages - (executionState.processedCount || 0),
+      timestamp: new Date().toISOString()
+    };
+
+    // Emit to specific user room
+    socket.to(`user_${userId}`).emit("session-progress-update", progressData);
+    logger.debug(`⚡ Real-time progress emitted from memory: ${sessionId} - ${progressPercentage.toFixed(2)}%`);
+
+  } catch (error) {
+    logger.error(`❌ Failed to emit real-time progress for ${sessionId}:`, error);
+  }
+};
+
 // Global Maps to store execution state (shared across all instances)
 const runningExecutions = new Map(); // sessionId -> execution state
 const businessHoursTimers = new Map(); // sessionId -> timer for auto-resume
@@ -223,8 +265,24 @@ class BlastExecutionService {
     this.runningExecutions = runningExecutions; // Use shared global Map
     this.businessHoursTimers = businessHoursTimers; // Use shared global Map
 
+    // ✅ PHASE 2 DAY 4: Health Check Cache
+    // Reduce redundant health checks with 5-minute TTL cache
+    this.healthCheckCache = new Map(); // sessionId -> { result, timestamp, sock }
+    this.HEALTH_CACHE_TTL = 5 * 60 * 1000; // 5 minutes in milliseconds
+
     // Note: Auto-resume scheduler will be initialized when the service is first used
     // this.initializeAutoResumeScheduler();
+  }
+
+  /**
+   * ✅ PHASE 1 DAY 1: Pure Random Delay Function (like New Message)
+   * Simple random delay without any complex calculations
+   * @param {number} min - Minimum delay in seconds
+   * @param {number} max - Maximum delay in seconds
+   * @returns {number} - Random delay in milliseconds
+   */
+  randomDelay(min, max) {
+    return Math.floor(Math.random() * (max - min + 1) + min) * 1000;
   }
 
   /**
@@ -288,50 +346,41 @@ class BlastExecutionService {
         throw new Error(`Session ${sessionId} not found`);
       }
 
-      // Check business hours first (unless forced)
-      if (!forceStart) {
-        const businessHoursConfig = session.config?.businessHours || {};
-        if (
-          businessHoursConfig.enabled &&
-          !this.isWithinBusinessHours(businessHoursConfig)
-        ) {
-          // Instead of throwing error, update session to PAUSED and schedule for later
-          await session.update({
-            status: "PAUSED",
-            pausedAt: new Date(),
-          });
-
-          // PERBAIKAN: Schedule auto-resume saat campaign di-pause
-          this.scheduleBusinessHoursCheck(sessionId, businessHoursConfig);
-
-          const nextStart = this.getNextBusinessHoursStart(businessHoursConfig);
-          const timeUntilNext = nextStart.getTime() - Date.now();
-          const minutesUntilNext = Math.round(timeUntilNext / (1000 * 60));
-
-          logger.info(
-            `⏰ Session ${sessionId} scheduled for ${nextStart.toLocaleString()} (in ${minutesUntilNext} minutes)`
-          );
-
-          // Emit UI update for paused status
-          _emitSessionsUpdate(sessionId);
-
-          // Emit toast notification for auto-scheduling
-          _emitToastNotification(
-            "info",
-            "Campaign Dijadwalkan",
-            `Campaign akan otomatis dimulai pada ${nextStart.toLocaleString()} (${minutesUntilNext} menit lagi)`,
-            sessionId
-          );
-
-          return {
-            success: true,
-            sessionId,
-            message: `Campaign dijadwalkan otomatis resume pada ${nextStart.toLocaleString()} (${minutesUntilNext} menit lagi)`,
-            scheduledFor: nextStart,
-            minutesUntilResume: minutesUntilNext,
-          };
-        }
-      }
+      // ❌ PHASE 1 DAY 2: Remove business hours check before starting
+      // Business hours enforcement removed - blast starts immediately
+      // if (!forceStart) {
+      //   const businessHoursConfig = session.config?.businessHours || {};
+      //   if (
+      //     businessHoursConfig.enabled &&
+      //     !this.isWithinBusinessHours(businessHoursConfig)
+      //   ) {
+      //     await session.update({
+      //       status: "PAUSED",
+      //       pausedAt: new Date(),
+      //     });
+      //     this.scheduleBusinessHoursCheck(sessionId, businessHoursConfig);
+      //     const nextStart = this.getNextBusinessHoursStart(businessHoursConfig);
+      //     const timeUntilNext = nextStart.getTime() - Date.now();
+      //     const minutesUntilNext = Math.round(timeUntilNext / (1000 * 60));
+      //     logger.info(
+      //       `⏰ Session ${sessionId} scheduled for ${nextStart.toLocaleString()} (in ${minutesUntilNext} minutes)`
+      //     );
+      //     _emitSessionsUpdate(sessionId);
+      //     _emitToastNotification(
+      //       "info",
+      //       "Campaign Dijadwalkan",
+      //       `Campaign akan otomatis dimulai pada ${nextStart.toLocaleString()} (${minutesUntilNext} menit lagi)`,
+      //       sessionId
+      //     );
+      //     return {
+      //       success: true,
+      //       sessionId,
+      //       message: `Campaign dijadwalkan otomatis resume pada ${nextStart.toLocaleString()} (${minutesUntilNext} menit lagi)`,
+      //       scheduledFor: nextStart,
+      //       minutesUntilResume: minutesUntilNext,
+      //     };
+      //   }
+      // }
 
       // Check if already running in-memory. If so, and DB status allows, clear stale state.
       if (this.runningExecutions.has(sessionId)) {
@@ -344,9 +393,10 @@ class BlastExecutionService {
           logger.warn(
             `⚠️ Stale execution state found for session ${sessionId}. Clearing and restarting.`
           );
-          if (existingState.updateInterval) {
-            clearInterval(existingState.updateInterval);
-          }
+          // ❌ PHASE 2 DAY 5: No longer using updateInterval
+          // if (existingState.updateInterval) {
+          //   clearInterval(existingState.updateInterval);
+          // }
           this.runningExecutions.delete(sessionId);
         } else {
           throw new Error(`Session ${sessionId} is already running`);
@@ -361,32 +411,33 @@ class BlastExecutionService {
         );
       }
 
-      // Check session health before starting (unless forced)
-      if (!forceStart) {
-        const healthCheck = await this.checkSessionHealth(sessionId);
-        if (!healthCheck.healthy) {
-          logger.error(`🚫 Session health check failed for ${sessionId}: ${healthCheck.reason}`);
-
-          // Update session status to ERROR
-          await session.update({
-            status: "ERROR",
-            errorMessage: `Health check failed: ${healthCheck.reason}`,
-            errorCode: healthCheck.errorCode || "HEALTH_CHECK_FAILED",
-          });
-
-          // Emit error notification
-          _emitToastNotification(
-            "error",
-            "Session Health Check Failed",
-            `Cannot start blast: ${healthCheck.reason}`,
-            sessionId
-          );
-
-          throw new Error(`Session health check failed: ${healthCheck.reason}`);
-        }
-      } else {
-        logger.warn(`⚠️ Force starting session ${sessionId} - bypassing health check`);
-      }
+      // ❌ PHASE 1 DAY 2: Remove pre-flight health check
+      // Health check removed - start immediately, check reactively on errors
+      // if (!forceStart) {
+      //   const healthCheck = await this.checkSessionHealth(sessionId);
+      //   if (!healthCheck.healthy) {
+      //     logger.error(`🚫 Session health check failed for ${sessionId}: ${healthCheck.reason}`);
+      //
+      //     // Update session status to ERROR
+      //     await session.update({
+      //       status: "ERROR",
+      //       errorMessage: `Health check failed: ${healthCheck.reason}`,
+      //       errorCode: healthCheck.errorCode || "HEALTH_CHECK_FAILED",
+      //     });
+      //
+      //     // Emit error notification
+      //     _emitToastNotification(
+      //       "error",
+      //       "Session Health Check Failed",
+      //       `Cannot start blast: ${healthCheck.reason}`,
+      //       sessionId
+      //     );
+      //
+      //     throw new Error(`Session health check failed: ${healthCheck.reason}`);
+      //   }
+      // } else {
+      //   logger.warn(`⚠️ Force starting session ${sessionId} - bypassing health check`);
+      // }
 
       // Update database status to RUNNING first
       await session.update({
@@ -406,14 +457,17 @@ class BlastExecutionService {
         successCount: 0,
         failedCount: 0,
         totalMessages: session.totalMessages || 0,
+        // ✅ PHASE 2 DAY 5: Batch tracking
+        lastDBUpdate: 0, // Message count at last DB update
+        lastSocketEmit: Date.now(), // Timestamp of last socket emission
       };
 
       this.runningExecutions.set(sessionId, executionState);
 
-      // Start periodic updates via socket
-      const updateInterval = setInterval(() => _emitSessionsUpdate(sessionId), 2000); // Update every 2 seconds
-
-      executionState.updateInterval = updateInterval;
+      // ❌ PHASE 2 DAY 5: Remove periodic update interval
+      // Socket updates now happen every 30s in processMessages loop
+      // const updateInterval = setInterval(() => _emitSessionsUpdate(sessionId), 2000);
+      // executionState.updateInterval = updateInterval;
 
       // Emit immediate UI update for running status
       _emitSessionsUpdate(sessionId);
@@ -478,122 +532,99 @@ class BlastExecutionService {
           continue;
         }
 
-        // Check business hours
-        if (
-          businessHoursConfig.enabled &&
-          !this.isWithinBusinessHours(businessHoursConfig)
-        ) {
-          if (!executionState.isPaused) {
-            logger.info(
-              `⏰ Session ${sessionId} is outside business hours. Auto-pausing.`
-            );
-            executionState.isPaused = true;
+        // ❌ PHASE 1 DAY 1: Remove business hours enforcement
+        // Business hours checks removed - blast can run 24/7
+        // if (
+        //   businessHoursConfig.enabled &&
+        //   !this.isWithinBusinessHours(businessHoursConfig)
+        // ) {
+        //   if (!executionState.isPaused) {
+        //     logger.info(
+        //       `⏰ Session ${sessionId} is outside business hours. Auto-pausing.`
+        //     );
+        //     executionState.isPaused = true;
+        //     await BlastSession.update(
+        //       { status: "PAUSED", pausedAt: new Date() },
+        //       { where: { sessionId } }
+        //     );
+        //     this.scheduleBusinessHoursCheck(sessionId, businessHoursConfig);
+        //     _emitSessionsUpdate(sessionId);
+        //     _emitToastNotification(
+        //       "warning",
+        //       "Campaign Auto-Pause",
+        //       `Campaign ${sessionId} dijeda otomatis karena di luar jam kerja`,
+        //       sessionId
+        //     );
+        //   }
+        //   await this.sleep(60 * 1000);
+        //   continue;
+        // } else if (
+        //   businessHoursConfig.enabled &&
+        //   executionState.isPaused &&
+        //   this.isWithinBusinessHours(businessHoursConfig)
+        // ) {
+        //   logger.info(
+        //     `✅ Session ${sessionId} is now within business hours. Auto-resuming.`
+        //   );
+        //   executionState.isPaused = false;
+        //   await BlastSession.update(
+        //     { status: "RUNNING", resumedAt: new Date() },
+        //     { where: { sessionId } }
+        //   );
+        //   _emitSessionsUpdate(sessionId);
+        //   _emitToastNotification(
+        //     "success",
+        //     "Campaign Auto-Resume",
+        //     `Campaign ${sessionId} dilanjutkan otomatis karena sudah masuk jam kerja`,
+        //     sessionId
+        //   );
+        // }
 
-            // Update database status
-            await BlastSession.update(
-              { status: "PAUSED", pausedAt: new Date() },
-              { where: { sessionId } }
-            );
-
-            // Schedule auto-resume check
-            this.scheduleBusinessHoursCheck(sessionId, businessHoursConfig);
-
-            // Emit UI update for auto-pause
-            _emitSessionsUpdate(sessionId);
-
-            // Emit toast notification for auto-pause
-            _emitToastNotification(
-              "warning",
-              "Campaign Auto-Pause",
-              `Campaign ${sessionId} dijeda otomatis karena di luar jam kerja`,
-              sessionId
-            );
-          }
-
-          // Sleep for 1 minute and check again
-          await this.sleep(60 * 1000);
-          continue;
-        } else if (
-          businessHoursConfig.enabled &&
-          executionState.isPaused &&
-          this.isWithinBusinessHours(businessHoursConfig)
-        ) {
-          // Auto-resume when back in business hours
-          logger.info(
-            `✅ Session ${sessionId} is now within business hours. Auto-resuming.`
-          );
-          executionState.isPaused = false;
-
-          // Update database status
-          await BlastSession.update(
-            { status: "RUNNING", resumedAt: new Date() },
-            { where: { sessionId } }
-          );
-
-          // Emit UI update for auto-resume
-          _emitSessionsUpdate(sessionId);
-
-          // Emit toast notification for auto-resume
-          _emitToastNotification(
-            "success",
-            "Campaign Auto-Resume",
-            `Campaign ${sessionId} dilanjutkan otomatis karena sudah masuk jam kerja`,
-            sessionId
-          );
-        }
+        // ❌ PHASE 1 DAY 1: Remove proactive health checks
+        // Emergency health checks removed - will check reactively on errors only
+        // if (executionState.processedCount > 0 && executionState.processedCount % 10 === 0) {
+        //   try {
+        //     const healthCheck = await emergencyMonitoringService.checkSessionHealth(sessionId);
+        //     if (healthCheck.action === "AUTO_PAUSED") {
+        //       logger.error(`🚨 Session ${sessionId} was auto-paused due to high ban rate!`);
+        //       executionState.isStopped = true;
+        //       executionState.stopReason = "AUTO_PAUSED_HIGH_BAN_RATE";
+        //       break;
+        //     } else if (healthCheck.action === "ALERT") {
+        //       logger.warn(`⚠️ Session ${sessionId} has elevated ban rate: ${healthCheck.banRateStats.banRate}`);
+        //     }
+        //   } catch (healthError) {
+        //     logger.warn(`⚠️ Health check failed for ${sessionId}:`, healthError.message);
+        //   }
+        // }
+        
+        // ❌ PHASE 1 DAY 1: Remove recovery mode checks
+        // Recovery checks removed - pure random timing only
+        // if (executionState.processedCount > 0 && executionState.processedCount % 5 === 0) {
+        //   try {
+        //     const recoveryService = getRecoveryModeService();
+        //     const throttleDecision = await recoveryService.checkAndThrottle(sessionId);
+        //     if (throttleDecision.shouldStop) {
+        //       logger.error(`🚨 [Recovery] Session ${sessionId} STOPPED due to critical health (${throttleDecision.healthScore})`);
+        //       executionState.isStopped = true;
+        //       executionState.stopReason = `HEALTH_CRITICAL_${throttleDecision.throttleLevel}`;
+        //       break;
+        //     }
+        //     if (throttleDecision.shouldPause) {
+        //       logger.warn(`🏥 [Recovery] Proactive pause: ${throttleDecision.pauseDuration/1000}s for health ${throttleDecision.healthScore} (${throttleDecision.throttleLevel})`);
+        //       await this.sleep(throttleDecision.pauseDuration);
+        //     }
+        //     const recoveryInfo = recoveryService.isInRecoveryMode(sessionId);
+        //     if (recoveryInfo) {
+        //       logger.info(`🏥 [Recovery] Session in ${recoveryInfo.level} recovery mode (${recoveryInfo.throttleMultiplier}x slower)`);
+        //       session.config = await recoveryService.getRecoveryAdjustedConfig(sessionId, session.config);
+        //     }
+        //   } catch (recoveryError) {
+        //     logger.warn(`⚠️ Recovery check failed for ${sessionId}:`, recoveryError.message);
+        //   }
+        // }
 
         // Get next batch of messages
-        // ========== PHASE 1: EMERGENCY HEALTH CHECK (BAN PREVENTION) ==========
-        // Check session health every 10 messages
-        if (executionState.processedCount > 0 && executionState.processedCount % 10 === 0) {
-          try {
-            const healthCheck = await emergencyMonitoringService.checkSessionHealth(sessionId);
-            
-            if (healthCheck.action === "AUTO_PAUSED") {
-              logger.error(`🚨 Session ${sessionId} was auto-paused due to high ban rate!`);
-              executionState.isStopped = true;
-              executionState.stopReason = "AUTO_PAUSED_HIGH_BAN_RATE";
-              break;
-            } else if (healthCheck.action === "ALERT") {
-              logger.warn(`⚠️ Session ${sessionId} has elevated ban rate: ${healthCheck.banRateStats.banRate}`);
-            }
-          } catch (healthError) {
-            logger.warn(`⚠️ Health check failed for ${sessionId}:`, healthError.message);
-          }
-        }
-        // ========== END PHASE 1 MODIFICATION ==========
-        
-        // ========== PHASE 3 [P3-2]: PROACTIVE HEALTH MONITORING & RECOVERY ==========
-        // Check if proactive throttling/pause needed based on health
-        if (executionState.processedCount > 0 && executionState.processedCount % 5 === 0) {
-          try {
-            const recoveryService = getRecoveryModeService();
-            const throttleDecision = await recoveryService.checkAndThrottle(sessionId);
-            
-            if (throttleDecision.shouldStop) {
-              logger.error(`🚨 [Recovery] Session ${sessionId} STOPPED due to critical health (${throttleDecision.healthScore})`);
-              executionState.isStopped = true;
-              executionState.stopReason = `HEALTH_CRITICAL_${throttleDecision.throttleLevel}`;
-              break;
-            }
-            
-            if (throttleDecision.shouldPause) {
-              logger.warn(`🏥 [Recovery] Proactive pause: ${throttleDecision.pauseDuration/1000}s for health ${throttleDecision.healthScore} (${throttleDecision.throttleLevel})`);
-              await this.sleep(throttleDecision.pauseDuration);
-            }
-            
-            // Apply recovery-adjusted config if in recovery mode
-            const recoveryInfo = recoveryService.isInRecoveryMode(sessionId);
-            if (recoveryInfo) {
-              logger.info(`🏥 [Recovery] Session in ${recoveryInfo.level} recovery mode (${recoveryInfo.throttleMultiplier}x slower)`);
-              session.config = await recoveryService.getRecoveryAdjustedConfig(sessionId, session.config);
-            }
-            
-          } catch (recoveryError) {
-            logger.warn(`⚠️ Recovery check failed for ${sessionId}:`, recoveryError.message);
-          }
-        }
-        // ========== END PHASE 3 [P3-2] ==========
 
         const messages = await messageQueueHandler.getNextBatch(sessionId, 1);
 
@@ -653,16 +684,16 @@ class BlastExecutionService {
           if (isFirstMessage) {
             logger.info(`🚀 First message - sending immediately without delays!`);
           } else {
-            // ⏱️ APPLY MESSAGE DELAY (delay sebelum kirim pesan)
-            const messageDelayConfig = session.config?.messageDelay;
-            if (messageDelayConfig && messageDelayConfig.min && messageDelayConfig.max) {
-              const minDelayMs = messageDelayConfig.min * 1000;
-              const maxDelayMs = messageDelayConfig.max * 1000;
-              const randomDelay = Math.floor(Math.random() * (maxDelayMs - minDelayMs + 1)) + minDelayMs;
-              
-              logger.info(`⏳ Applying message delay: ${(randomDelay / 1000).toFixed(1)}s (range: ${messageDelayConfig.min}s-${messageDelayConfig.max}s)`);
-              await this.sleep(randomDelay);
-            }
+            // ❌ PHASE 1 DAY 1: Remove message delay (delay sebelum kirim pesan)
+            // Message delay removed - only contact delay will be used after sending
+            // const messageDelayConfig = session.config?.messageDelay;
+            // if (messageDelayConfig && messageDelayConfig.min && messageDelayConfig.max) {
+            //   const minDelayMs = messageDelayConfig.min * 1000;
+            //   const maxDelayMs = messageDelayConfig.max * 1000;
+            //   const randomDelay = Math.floor(Math.random() * (maxDelayMs - minDelayMs + 1)) + minDelayMs;
+            //   logger.info(`⏳ Applying message delay: ${(randomDelay / 1000).toFixed(1)}s (range: ${messageDelayConfig.min}s-${messageDelayConfig.max}s)`);
+            //   await this.sleep(randomDelay);
+            // }
           }
 
           // Send message
@@ -680,6 +711,9 @@ class BlastExecutionService {
             
             logger.info(`✅ Message sent successfully: ${message.phone}`);
           } else {
+            // ✅ PHASE 2 DAY 4: Handle send error reactively
+            await this.handleSendError(sessionId, result, executionState);
+
             // Check if this is a session-level error that should stop execution
             if (result.isSessionError) {
               logger.error(`🚫 Session error detected, stopping execution: ${result.errorType}`);
@@ -705,16 +739,36 @@ class BlastExecutionService {
           executionState.processedCount++;
           executionState.currentIndex = message.messageIndex;
 
-          // Update session progress
-          await this.updateSessionProgress(sessionId, executionState);
+          // ⚡ REAL-TIME: Emit progress from memory (every message, super fast!)
+          // No DB query needed - 100% real-time like nextMessageInfo
+          _emitProgressUpdate(sessionId, executionState, session.userId);
 
-          // Emit UI update every 5 messages or every 10 seconds
-          if (
-            executionState.processedCount % 5 === 0 ||
-            Date.now() - (executionState.lastUIUpdate || 0) > 10000
-          ) {
-            executionState.lastUIUpdate = Date.now();
-            _emitSessionsUpdate(sessionId);
+          // 💾 DB UPDATE: Batch database updates for persistence (every 10 messages or 10 seconds)
+          const messagesSinceLastUpdate = executionState.processedCount - executionState.lastDBUpdate;
+          const timeSinceLastUpdate = Date.now() - executionState.lastDBUpdate;
+          
+          const shouldUpdateDB = messagesSinceLastUpdate >= 10 || 
+                                executionState.processedCount === 1 ||
+                                timeSinceLastUpdate >= 10000; // Force update every 10s
+          
+          if (shouldUpdateDB) {
+            await this.updateSessionProgress(sessionId, executionState);
+            executionState.lastDBUpdate = executionState.processedCount;
+            logger.debug(`💾 DB persisted at message ${executionState.processedCount} (${((executionState.processedCount / executionState.totalMessages) * 100).toFixed(1)}%)`);
+          }
+
+          // 📡 FULL SESSION UPDATE: Emit complete sessions list periodically (every 30 seconds)
+          const timeSinceLastFullEmit = Date.now() - executionState.lastSocketEmit;
+          if (timeSinceLastFullEmit >= 30000 || executionState.processedCount === 1) {
+            setImmediate(async () => {
+              try {
+                await _emitSessionsUpdate(sessionId);
+                logger.debug(`📡 Full sessions-update emitted at message ${executionState.processedCount}`);
+              } catch (err) {
+                logger.warn(`⚠️ Failed to emit full sessions update:`, err);
+              }
+            });
+            executionState.lastSocketEmit = Date.now();
           }
         } catch (messageError) {
           logger.error(
@@ -728,9 +782,8 @@ class BlastExecutionService {
           executionState.failedCount++;
         }
 
-        // ⏱️ APPLY CONTACT DELAY (delay antar kontak)
-        // 🤖 PHASE 3 [P3-1]: Get adaptive delay based on real-time risk
-        let contactDelayConfig = session.config?.contactDelay;
+        // ✅ PHASE 1 DAY 1: SIMPLIFIED CONTACT DELAY - Pure Random Only
+        const contactDelayConfig = session.config?.contactDelay;
         
         // 🚀 CHECK IF THIS IS THE LAST MESSAGE - Skip delay if last message was successful
         const queueStatsAfterSend = await messageQueueHandler.getQueueStats(sessionId);
@@ -740,34 +793,12 @@ class BlastExecutionService {
           logger.info(`🎉 Last message sent successfully! Skipping contact delay and completing session...`);
           // Don't apply delay for last message, let it complete immediately
         } else if (contactDelayConfig && contactDelayConfig.min && contactDelayConfig.max) {
-          // try {
-          //   const adaptiveService = getAdaptiveDelayService();
-          //   const adaptiveDelay = await adaptiveService.getAdaptiveDelay(sessionId, {
-          //     min: contactDelayConfig.min,
-          //     max: contactDelayConfig.max
-          //   });
-            
-          //   // Use adaptive delay if available
-          //   if (adaptiveDelay && !adaptiveDelay.error) {
-          //     contactDelayConfig = { min: adaptiveDelay.min, max: adaptiveDelay.max };
-          //     logger.info(`🤖 [AdaptiveDelay] Adjusted: ${adaptiveDelay.original_min}-${adaptiveDelay.original_max}s → ${adaptiveDelay.min}-${adaptiveDelay.max}s (${adaptiveDelay.riskLevel}, ${adaptiveDelay.multiplier}x)`);
-              
-          //     // Check if dynamic throttle suggests pause
-          //     const throttle = await adaptiveService.getDynamicThrottle(sessionId);
-          //     if (throttle.shouldPause) {
-          //       logger.warn(`⚠️ [DynamicThrottle] Pausing for ${throttle.pauseDuration/1000}s due to ${throttle.reason}`);
-          //       await this.sleep(throttle.pauseDuration);
-          //     }
-          //   }
-          // } catch (adaptiveError) {
-          //   logger.error(`[AdaptiveDelay] Error, using base delay:`, adaptiveError.message);
-          //   // Continue with base delay
-          // }
+          // ❌ PHASE 1 DAY 1: Remove adaptive delay adjustments
+          // No more adaptive service, dynamic throttle, or risk-based adjustments
+          // Pure random delay from user config only
           
-          // Random delay between min and max (in seconds, convert to ms)
-          const minDelayMs = contactDelayConfig.min * 1000;
-          const maxDelayMs = contactDelayConfig.max * 1000;
-          const randomDelay = Math.floor(Math.random() * (maxDelayMs - minDelayMs + 1)) + minDelayMs;
+          // ✅ Pure random delay using the new randomDelay function
+          const randomDelay = this.randomDelay(contactDelayConfig.min, contactDelayConfig.max);
           
           // ⏱️ Track next contact delay for estimation
           executionState.nextContactDelay = randomDelay;
@@ -791,124 +822,6 @@ class BlastExecutionService {
           continue; // Skip to loop end, will break naturally
         }
         
-        // �🛑 CHECK REST THRESHOLD (istirahat setelah X pesan) with VARIED PATTERNS
-        const restThresholdConfig = session.config?.restThreshold;
-        const restDelayConfig = session.config?.restDelay;
-        
-        if (restThresholdConfig && restDelayConfig) {
-          // Initialize rest counter if not exists
-          if (!executionState.messagesSinceLastRest) {
-            executionState.messagesSinceLastRest = 0;
-          }
-          
-          executionState.messagesSinceLastRest++;
-          
-          // ⚠️ PHASE 2: WIDER threshold variance (30-120 instead of fixed range)
-          const minThreshold = Math.max(30, restThresholdConfig.min - 20);
-          const maxThreshold = Math.min(120, restThresholdConfig.max + 20);
-          const randomThreshold = Math.floor(Math.random() * (maxThreshold - minThreshold + 1)) + minThreshold;
-          
-          if (executionState.messagesSinceLastRest >= randomThreshold) {
-            // ⚠️ PHASE 2: MULTIPLE rest duration categories
-            const restCategory = Math.random();
-            let randomRestDelay;
-            let categoryName;
-            
-            if (restCategory < 0.40) {
-              // SHORT rest (40% chance): 30-45 min
-              randomRestDelay = (30 + Math.random() * 15) * 60 * 1000;
-              categoryName = "SHORT";
-            } else if (restCategory < 0.80) {
-              // MEDIUM rest (40% chance): 45-90 min
-              randomRestDelay = (45 + Math.random() * 45) * 60 * 1000;
-              categoryName = "MEDIUM";
-            } else {
-              // LONG rest (20% chance): 90-180 min
-              randomRestDelay = (90 + Math.random() * 90) * 60 * 1000;
-              categoryName = "LONG";
-            }
-            
-            logger.info(`😴 REST PERIOD (${categoryName}): Sent ${executionState.messagesSinceLastRest} messages (threshold: ${randomThreshold}). Resting for ${(randomRestDelay / 60000).toFixed(1)} minutes...`);
-            
-            // Emit toast notification for rest period
-            _emitToastNotification(
-              "info",
-              `${categoryName} Rest Period`,
-              `Campaign ${session.campaignName || sessionId} istirahat ${(randomRestDelay / 60000).toFixed(1)} menit setelah ${executionState.messagesSinceLastRest} pesan`,
-              sessionId
-            );
-            
-            await this.sleep(randomRestDelay);
-            
-            // Reset counter
-            executionState.messagesSinceLastRest = 0;
-            
-            logger.info(`✅ ${categoryName} rest period completed, resuming campaign...`);
-          }
-        }
-        // ========== END PHASE 2 MODIFICATION ==========
-
-        // 📊 CHECK DAILY LIMIT (batas harian)
-        const dailyLimitConfig = session.config?.dailyLimit;
-        if (dailyLimitConfig) {
-          // Random daily limit between min and max
-          const randomDailyLimit = Math.floor(
-            Math.random() * (dailyLimitConfig.max - dailyLimitConfig.min + 1)
-          ) + dailyLimitConfig.min;
-          
-          if (executionState.successCount >= randomDailyLimit) {
-            logger.warn(`🛑 DAILY LIMIT REACHED: ${executionState.successCount}/${randomDailyLimit} messages sent today`);
-            
-            // Emit toast notification for daily limit
-            _emitToastNotification(
-              "warning",
-              "Daily Limit Reached",
-              `Campaign ${session.campaignName || sessionId} mencapai batas harian ${randomDailyLimit} pesan`,
-              sessionId
-            );
-            
-            // Pause execution until next day
-            executionState.isPaused = true;
-            await BlastSession.update(
-              { 
-                status: "PAUSED", 
-                pausedAt: new Date(),
-                pauseReason: `Daily limit reached (${randomDailyLimit} messages)`
-              },
-              { where: { sessionId } }
-            );
-            
-            _emitSessionsUpdate(sessionId);
-            
-            // Schedule resume for next day at start of business hours
-            const nextDay = new Date();
-            nextDay.setDate(nextDay.getDate() + 1);
-            nextDay.setHours(session.config?.businessHours?.startHour || 9, 0, 0, 0);
-            
-            const msUntilNextDay = nextDay.getTime() - Date.now();
-            logger.info(`⏰ Campaign will auto-resume tomorrow at ${nextDay.toLocaleString()}`);
-            
-            setTimeout(async () => {
-              try {
-                logger.info(`✅ Auto-resuming campaign ${sessionId} after daily limit reset`);
-                executionState.isPaused = false;
-                executionState.successCount = 0; // Reset daily counter
-                executionState.messagesSinceLastRest = 0; // Reset rest counter
-                
-                await BlastSession.update(
-                  { status: "RUNNING", resumedAt: new Date() },
-                  { where: { sessionId } }
-                );
-                
-                _emitSessionsUpdate(sessionId);
-              } catch (error) {
-                logger.error(`❌ Error auto-resuming after daily limit:`, error);
-              }
-            }, msUntilNextDay);
-            
-            continue; // Skip to next iteration (will pause due to isPaused flag)
-          }
-        }
 
         // Check if stopped during processing
         if (executionState.isStopped) {
@@ -977,6 +890,19 @@ class BlastExecutionService {
         errorType = 'rate_limit';
         canRetry = true;
       }
+      // ✅ PHASE 1 DAY 3: Enhanced reactive phone validation
+      // Detect phone not on WhatsApp or invalid numbers from actual send attempt
+      // This replaces upfront validation with error-based detection
+      else if (errorMessage.includes('not registered') ||
+               errorMessage.includes('not on whatsapp') ||
+               errorMessage.includes('phone not found') ||
+               errorMessage.includes('recipient not found') ||
+               errorMessage.includes('number not registered')) {
+        isSessionError = false;
+        errorType = 'phone_not_registered';
+        canRetry = false;
+        logger.info(`📱 Phone not registered on WhatsApp detected via send attempt`);
+      }
       // Check for banned/blocked numbers
       else if (errorMessage.includes('banned') ||
                errorMessage.includes('blocked') ||
@@ -1016,29 +942,55 @@ class BlastExecutionService {
 
   /**
    * Check session health before starting blast execution
+   * ✅ PHASE 2 DAY 4: Now with caching (5-min TTL)
    * @param {string} sessionId - Session ID
+   * @param {boolean} forceRefresh - Force fresh check, ignore cache
    * @returns {Promise<Object>} - Health check result
    */
-  async checkSessionHealth(sessionId) {
+  async checkSessionHealth(sessionId, forceRefresh = false) {
     try {
+      // ✅ PHASE 2 DAY 4: Check cache first (unless force refresh)
+      if (!forceRefresh && this.healthCheckCache.has(sessionId)) {
+        const cached = this.healthCheckCache.get(sessionId);
+        const age = Date.now() - cached.timestamp;
+        
+        // If cache is still valid (< 5 minutes old)
+        if (age < this.HEALTH_CACHE_TTL) {
+          logger.debug(`💾 Using cached health check for ${sessionId} (age: ${Math.floor(age/1000)}s)`);
+          return cached.result;
+        } else {
+          logger.debug(`⏰ Health check cache expired for ${sessionId} (age: ${Math.floor(age/1000)}s)`);
+          this.healthCheckCache.delete(sessionId);
+        }
+      }
+
+      // Perform fresh health check
+      logger.debug(`🔍 Performing fresh health check for ${sessionId}${forceRefresh ? ' (forced)' : ''}`);
+
       const session = await BlastSession.findOne({ where: { sessionId } });
       if (!session) {
-        return { healthy: false, reason: 'Session not found' };
+        const result = { healthy: false, reason: 'Session not found' };
+        // Don't cache "not found" results
+        return result;
       }
 
       // Check if session is in error state
       if (session.status === 'ERROR' || session.status === 'BANNED') {
-        return {
+        const result = {
           healthy: false,
           reason: `Session status: ${session.status}`,
           errorCode: session.errorCode
         };
+        // Don't cache error states
+        return result;
       }
 
       // Get WhatsApp socket
       const sock = getSock(session.whatsappSessionId);
       if (!sock) {
-        return { healthy: false, reason: 'WhatsApp socket not available' };
+        const result = { healthy: false, reason: 'WhatsApp socket not available' };
+        // Don't cache socket unavailable
+        return result;
       }
 
       // Check connection state
@@ -1074,10 +1026,59 @@ class BlastExecutionService {
         // Don't fail the health check for store access issues
       }
 
-      return { healthy: true };
+      // ✅ PHASE 2 DAY 4: Cache the healthy result
+      const result = { healthy: true };
+      this.healthCheckCache.set(sessionId, {
+        result,
+        timestamp: Date.now(),
+        sock // Cache socket reference for quick access
+      });
+      logger.debug(`💾 Cached health check result for ${sessionId}`);
+
+      return result;
     } catch (error) {
       logger.error(`❌ Error checking session health for ${sessionId}:`, error);
-      return { healthy: false, reason: `Health check error: ${error.message}` };
+      const result = { healthy: false, reason: `Health check error: ${error.message}` };
+      // Don't cache errors
+      return result;
+    }
+  }
+
+  /**
+   * ✅ PHASE 2 DAY 4: Invalidate health check cache
+   * Call this on connection errors or session stop
+   * @param {string} sessionId - Session ID to invalidate
+   */
+  invalidateHealthCache(sessionId) {
+    if (this.healthCheckCache.has(sessionId)) {
+      this.healthCheckCache.delete(sessionId);
+      logger.debug(`🗑️ Invalidated health check cache for ${sessionId}`);
+    }
+  }
+
+  /**
+   * ✅ PHASE 2 DAY 4: Reactive error handling
+   * Handle send errors and invalidate cache on connection issues
+   * @param {string} sessionId - Session ID
+   * @param {Object} result - Send result with error info
+   * @param {Object} executionState - Current execution state
+   */
+  async handleSendError(sessionId, result, executionState) {
+    // Check if error is connection-related
+    if (result.errorType === 'connection' || result.errorType === 'session_banned') {
+      logger.warn(`🔄 Connection error detected for ${sessionId}, invalidating health cache`);
+      
+      // Invalidate cache to force fresh check
+      this.invalidateHealthCache(sessionId);
+      
+      // Perform fresh health check
+      const healthCheck = await this.checkSessionHealth(sessionId, true);
+      
+      if (!healthCheck.healthy) {
+        logger.error(`❌ Fresh health check failed: ${healthCheck.reason}`);
+        executionState.isStopped = true;
+        executionState.stopReason = 'unhealthy_after_error';
+      }
     }
   }
 
@@ -1382,6 +1383,9 @@ class BlastExecutionService {
       executionState.isStopped = true;
       executionState.stoppedAt = new Date();
 
+      // ✅ PHASE 2 DAY 4: Invalidate health cache on stop
+      this.invalidateHealthCache(sessionId);
+
       // Remove from running executions
       this.runningExecutions.delete(sessionId);
 
@@ -1480,6 +1484,11 @@ class BlastExecutionService {
       executionState.isStopped = true;
       executionState.stopReason = 'completed';
 
+      // ✅ PHASE 2 DAY 5: Final batch update with all stats
+      // Perform final progress update to flush any pending changes
+      await this.updateSessionProgress(sessionId, executionState, true); // Force emit on completion
+      logger.debug(`💾 Final batch DB update for session ${sessionId}`);
+
       // Update session status in database
       const BlastSession = require('../models/blastSessionModel');
       await BlastSession.update(
@@ -1493,6 +1502,9 @@ class BlastExecutionService {
         }
       );
 
+      // ✅ PHASE 2 DAY 4: Clean up health cache
+      this.invalidateHealthCache(sessionId);
+
       // Clean up execution state
       this.runningExecutions.delete(sessionId);
 
@@ -1504,8 +1516,9 @@ class BlastExecutionService {
         sessionId
       );
 
-      // Emit final session update
+      // ✅ PHASE 2 DAY 5: Final socket emission
       _emitSessionsUpdate(sessionId);
+      logger.debug(`📡 Final socket emission for session ${sessionId}`);
 
       logger.info(`✅ Execution completed successfully for session ${sessionId}`);
 
@@ -1519,7 +1532,7 @@ class BlastExecutionService {
   /**
    * Update session progress in database
    */
-  async updateSessionProgress(sessionId, executionState) {
+  async updateSessionProgress(sessionId, executionState, forceEmit = false) {
     try {
       const BlastSession = require('../models/blastSessionModel');
 
@@ -1543,7 +1556,21 @@ class BlastExecutionService {
         }
       );
 
-      logger.debug(`📊 Session progress updated: ${sessionId} - ${progressPercentage.toFixed(2)}%`);
+      logger.debug(`📊 Session progress updated: ${sessionId} - ${progressPercentage.toFixed(2)}% (sent: ${executionState.successCount}, failed: ${executionState.failedCount}, skipped: ${executionState.skippedCount})`);
+
+      // ✅ Emit real-time progress update via socket if forced (completion, pause, resume)
+      if (forceEmit) {
+        // Use setImmediate to ensure database commit completes before query
+        setImmediate(async () => {
+          try {
+            await _emitSessionsUpdate(sessionId);
+            logger.debug(`📡 Force socket emit for ${sessionId} at ${progressPercentage.toFixed(2)}%`);
+          } catch (socketError) {
+            logger.warn(`⚠️ Failed to emit progress update for ${sessionId}:`, socketError);
+          }
+        });
+      }
+      // Note: Regular progress emissions are handled in the main execution loop (every 5 seconds)
 
     } catch (error) {
       logger.error(`❌ Failed to update session progress for ${sessionId}:`, error);
