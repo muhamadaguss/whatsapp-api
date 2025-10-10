@@ -130,19 +130,19 @@ const Organization = sequelize.define(
         name: "idx_organizations_email",
       },
       {
-        fields: ["ownerId"],
+        fields: ["owner_id"],
         name: "idx_organizations_owner_id",
       },
       {
-        fields: ["subscriptionPlan"],
+        fields: ["subscription_plan"],
         name: "idx_organizations_subscription_plan",
       },
       {
-        fields: ["subscriptionStatus"],
+        fields: ["subscription_status"],
         name: "idx_organizations_subscription_status",
       },
       {
-        fields: ["isActive"],
+        fields: ["is_active"],
         name: "idx_organizations_is_active",
       },
     ],

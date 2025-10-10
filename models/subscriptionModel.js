@@ -84,11 +84,11 @@ const Subscription = sequelize.define(
     underscored: true, // Use snake_case for column names in database
     indexes: [
       {
-        fields: ["organizationId"],
+        fields: ["organization_id"],
         name: "idx_subscriptions_organization_id",
       },
       {
-        fields: ["planId"],
+        fields: ["plan_id"],
         name: "idx_subscriptions_plan_id",
       },
       {
@@ -96,11 +96,11 @@ const Subscription = sequelize.define(
         name: "idx_subscriptions_status",
       },
       {
-        fields: ["startsAt"],
+        fields: ["starts_at"],
         name: "idx_subscriptions_starts_at",
       },
       {
-        fields: ["endsAt"],
+        fields: ["ends_at"],
         name: "idx_subscriptions_ends_at",
       },
     ],

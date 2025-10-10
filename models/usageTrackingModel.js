@@ -72,19 +72,19 @@ const UsageTracking = sequelize.define(
     underscored: true, // Use snake_case for column names in database
     indexes: [
       {
-        fields: ["organizationId", "metricType"],
+        fields: ["organization_id", "metric_type"],
         name: "idx_usage_tracking_org_metric",
       },
       {
-        fields: ["periodStart", "periodEnd"],
+        fields: ["period_start", "period_end"],
         name: "idx_usage_tracking_period",
       },
       {
-        fields: ["metricType"],
+        fields: ["metric_type"],
         name: "idx_usage_tracking_metric_type",
       },
       {
-        fields: ["recordedAt"],
+        fields: ["recorded_at"],
         name: "idx_usage_tracking_recorded_at",
       },
     ],

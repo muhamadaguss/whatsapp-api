@@ -80,19 +80,19 @@ const QuotaAlert = sequelize.define(
     underscored: true, // Use snake_case for column names in database
     indexes: [
       {
-        fields: ["organizationId"],
+        fields: ["organization_id"],
         name: "idx_quota_alerts_organization_id",
       },
       {
-        fields: ["quotaType"],
+        fields: ["quota_type"],
         name: "idx_quota_alerts_quota_type",
       },
       {
-        fields: ["alertLevel"],
+        fields: ["alert_level"],
         name: "idx_quota_alerts_alert_level",
       },
       {
-        fields: ["isResolved"],
+        fields: ["is_resolved"],
         name: "idx_quota_alerts_is_resolved",
       },
     ],
