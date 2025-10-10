@@ -3,6 +3,9 @@ const router = express.Router();
 const multer = require("multer");
 const path = require("path");
 const { verifyToken } = require("../middleware/authMiddleware");
+const { tenantContext } = require("../middleware/tenantContext");
+const { withTenantContext } = require("../middleware/tenantIsolation");
+const quotaService = require("../services/quotaService");
 const {
   getQRImage,
   sendMessageWA,
@@ -55,23 +58,34 @@ const upload = multer({
   },
 });
 
-router.get("/qr-image/:sessionId", verifyToken, getQRImage);
+router.get("/qr-image/:sessionId", verifyToken, tenantContext, withTenantContext, getQRImage);
+
+// Send message - check quota before allowing
 router.post(
   "/send-message",
   verifyToken,
+  tenantContext,
+  withTenantContext,
+  quotaService.requireQuota("messages_sent", 1),
   upload.fields([{ name: "image" }, { name: "video" }]),
   sendMessageWA
 );
+
+// Upload Excel for blast - check quota (this will send multiple messages)
 router.post(
   "/upload/:sessionId",
   verifyToken,
+  tenantContext,
+  withTenantContext,
+  quotaService.requireQuota("blast_campaigns", 1),
   upload.single("excel"),
   uploadExcel
 );
-router.post("/logoutSession/:sessionId", verifyToken, logoutSession);
-router.get("/sessions", verifyToken, getActiveSessions);
-router.get("/contact-details/:sessionId/:jid", verifyToken, getContactDetails);
-router.get("/health/:sessionId", verifyToken, getSessionHealth);
+
+router.post("/logoutSession/:sessionId", verifyToken, tenantContext, withTenantContext, logoutSession);
+router.get("/sessions", verifyToken, tenantContext, withTenantContext, getActiveSessions);
+router.get("/contact-details/:sessionId/:jid", verifyToken, tenantContext, withTenantContext, getContactDetails);
+router.get("/health/:sessionId", verifyToken, tenantContext, withTenantContext, getSessionHealth);
 
 // Account metadata routes (Baileys → Database priority)
 router.get("/account/:sessionId/metadata", verifyToken, getAccountMetadata);

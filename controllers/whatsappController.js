@@ -17,6 +17,7 @@ const logger = require("../utils/logger");
 const SessionModel = require("../models/sessionModel");
 const UserModel = require("../models/userModel");
 const { asyncHandler, AppError } = require("../middleware/errorHandler");
+const usageTrackingService = require("../services/usageTrackingService");
 
 const getQRImage = asyncHandler(async (req, res) => {
   const { sessionId } = req.params;
@@ -155,6 +156,26 @@ const sendMessageWA = asyncHandler(async (req, res) => {
       logger.info(
         `📷 ${isVideo ? "Video" : "Image"} saved permanently: ${fileName}`
       );
+
+      // Track storage usage
+      try {
+        if (req.tenant?.organizationId) {
+          const fileSizeBytes = fs.statSync(permanentPath).size;
+          const fileSizeMB = fileSizeBytes / (1024 * 1024);
+          await usageTrackingService.updateStorageUsage(
+            req.tenant.organizationId,
+            fileSizeMB,
+            "add"
+          );
+          logger.info(
+            `💾 Storage usage updated: +${fileSizeMB.toFixed(
+              2
+            )}MB for organization ${req.tenant.organizationId}`
+          );
+        }
+      } catch (trackingError) {
+        logger.error(`❌ Failed to track storage usage:`, trackingError);
+      }
     } catch (saveError) {
       logger.error(
         `❌ Failed to save ${isVideo ? "video" : "image"} permanently: ${
@@ -376,6 +397,25 @@ const sendMessageWA = asyncHandler(async (req, res) => {
     });
   }
 
+  // Track message usage for quota
+  try {
+    if (req.tenant?.organizationId) {
+      await usageTrackingService.trackMessageSent(req.tenant.organizationId, {
+        sessionId,
+        phone,
+        messageType,
+        timestamp: new Date(),
+      });
+      logger.info(`📊 Message usage tracked for organization ${req.tenant.organizationId}`);
+    }
+  } catch (trackingError) {
+    logger.error(`❌ Failed to track message usage:`, {
+      error: trackingError.message,
+      organizationId: req.tenant?.organizationId,
+    });
+    // Don't throw error, response still success
+  }
+
   return res.status(200).json({ status: "success", result });
 });
 
@@ -393,6 +433,26 @@ const uploadExcel = asyncHandler(async (req, res) => {
       "File tidak ditemukan. Silakan upload file Excel atau gunakan input manual.",
       400
     );
+  }
+
+  // Track storage usage for uploaded file
+  if (filePath && req.tenant?.organizationId) {
+    try {
+      const fileSizeBytes = fs.statSync(filePath).size;
+      const fileSizeMB = fileSizeBytes / (1024 * 1024);
+      await usageTrackingService.updateStorageUsage(
+        req.tenant.organizationId,
+        fileSizeMB,
+        "add"
+      );
+      logger.info(
+        `💾 Excel file storage tracked: +${fileSizeMB.toFixed(
+          2
+        )}MB for organization ${req.tenant.organizationId}`
+      );
+    } catch (trackingError) {
+      logger.error(`❌ Failed to track Excel file storage:`, trackingError);
+    }
   }
 
   // Langsung balas ke client

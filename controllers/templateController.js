@@ -3,6 +3,7 @@ const { Op } = require("sequelize");
 const logger = require("../utils/logger");
 const { asyncHandler, AppError } = require("../middleware/errorHandler");
 const SpinTextEngine = require("../utils/spinTextEngine");
+const usageTrackingService = require("../services/usageTrackingService");
 
 const getTemplates = asyncHandler(async (req, res) => {
   const userId = req.user.id;
@@ -61,6 +62,25 @@ const createTemplate = asyncHandler(async (req, res) => {
       estimatedVariations,
     },
   };
+
+  // Update template count for quota tracking
+  try {
+    if (req.tenant?.organizationId) {
+      const totalTemplates = await Template.count({
+        where: { organizationId: req.tenant.organizationId },
+      });
+      await usageTrackingService.updateTemplateCount(
+        req.tenant.organizationId,
+        totalTemplates
+      );
+      logger.info(
+        `📊 Template count updated: ${totalTemplates} for organization ${req.tenant.organizationId}`
+      );
+    }
+  } catch (trackingError) {
+    logger.error(`❌ Failed to update template count:`, trackingError);
+    // Don't throw error, response still success
+  }
 
   res.status(201).json(response);
 });
@@ -128,6 +148,26 @@ const deleteTemplate = asyncHandler(async (req, res) => {
   }
 
   await template.destroy();
+
+  // Update template count for quota tracking
+  try {
+    if (req.tenant?.organizationId) {
+      const totalTemplates = await Template.count({
+        where: { organizationId: req.tenant.organizationId },
+      });
+      await usageTrackingService.updateTemplateCount(
+        req.tenant.organizationId,
+        totalTemplates
+      );
+      logger.info(
+        `📊 Template count updated: ${totalTemplates} for organization ${req.tenant.organizationId}`
+      );
+    }
+  } catch (trackingError) {
+    logger.error(`❌ Failed to update template count:`, trackingError);
+    // Don't throw error, response still success
+  }
+
   res.status(200).json({ message: "Template deleted successfully" });
 });
 

@@ -8,6 +8,7 @@
 
 const subscriptionService = require("./subscriptionService");
 const usageTrackingService = require("./usageTrackingService");
+const notificationService = require("./notificationService");
 const logger = require("../utils/logger");
 
 class QuotaService {
@@ -371,6 +372,15 @@ class QuotaService {
         return;
       }
 
+      // Get current usage and limit for the alert
+      const quotas = await subscriptionService.getOrganizationQuotas(organizationId);
+      const quotaKey = this._mapMetricToQuotaKey(metricType);
+      const limit = quotas[quotaKey] || 0;
+      const current = await usageTrackingService.getCurrentUsage(
+        organizationId,
+        metricType
+      );
+
       // Update subscription metadata with alert info
       await subscription.update({
         metadata: {
@@ -391,11 +401,30 @@ class QuotaService {
       });
 
       logger.info(
-        `Quota alert created: ${organizationId} - ${metricType} - ${alertLevel} (${percentage}%)`
+        `📢 Quota alert created: ${organizationId} - ${metricType} - ${alertLevel} (${percentage}%)`
       );
 
-      // TODO: Send actual notification (email, webhook, etc.)
-      // This would integrate with a notification service
+      // Send notification via email/webhook
+      try {
+        await notificationService.sendQuotaAlert(organizationId, {
+          metricType,
+          current,
+          limit,
+          percentage: Math.round(percentage),
+          status: alertLevel.toLowerCase(),
+          timestamp: new Date(),
+        });
+
+        logger.info(
+          `✅ Quota alert notification sent for ${organizationId} - ${metricType}`
+        );
+      } catch (notifyError) {
+        logger.error(
+          `❌ Failed to send quota alert notification:`,
+          notifyError
+        );
+        // Don't throw, alert was saved to DB
+      }
 
       return {
         organizationId,

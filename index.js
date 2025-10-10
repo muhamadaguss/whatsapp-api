@@ -350,6 +350,11 @@ async function startApplication() {
     fileCleanup.startAutoCleanup();
     logger.info("🧹 File cleanup manager started");
 
+    // Start cron jobs for SaaS platform
+    const cronJobs = require("./jobs/cronJobs");
+    cronJobs.startAll();
+    logger.info("🕐 Cron jobs started");
+
     // Start the server
     server.listen(port, () => {
       logger.info(`🚀 Server running at http://localhost:${port}`);
