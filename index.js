@@ -27,11 +27,13 @@ const chatsRoutes = require("./routes/chatRoutes");
 const contactRoutes = require("./routes/contactRoutes");
 const cleanupRoutes = require("./routes/cleanupRoutes");
 const blastControlRoutes = require("./routes/blastControlRoutes");
+const organizationRoutes = require("./routes/organizationRoutes");
 const sequelize = require("./models/db");
 const { loadExistingSessions } = require("./auth/session");
 const logger = require("./utils/logger"); // Mengimpor logger
 const { initSocket } = require("./auth/socket");
 const { errorHandler, notFound } = require("./middleware/errorHandler");
+const { setupTenantIsolation } = require("./middleware/tenantIsolation");
 const {
   DatabaseHealthCheck,
   testDatabaseConnection,
@@ -230,6 +232,9 @@ app.use("/api/blast", require("./routes/riskAssessment")); // Risk Assessment AP
 app.use("/api/whatsapp", require("./routes/accountHealth")); // Account Health API
 app.use("/api/blast", require("./routes/analytics")); // Analytics API
 
+// SaaS Multi-Tenant Routes
+app.use("/api/organizations", organizationRoutes); // Organization & Subscription Management
+
 // Error handling middleware (harus di akhir setelah semua routes)
 app.use(notFound); // 404 handler
 app.use(errorHandler); // Global error handler
@@ -285,6 +290,11 @@ async function initializeDatabase() {
     require("./models/blastSessionModel");
     require("./models/blastMessageModel");
 
+    // Load SaaS multi-tenant models
+    require("./models/organizationModel");
+    require("./models/subscriptionPlanModel");
+    require("./models/subscriptionModel");
+
     // Setup model associations
     logger.info("🔗 Setting up model associations...");
     
@@ -301,9 +311,20 @@ async function initializeDatabase() {
 
     logger.info("✅ All models and associations loaded successfully");
 
+    // Setup tenant isolation hooks
+    logger.info("🔒 Setting up tenant isolation...");
+    setupTenantIsolation(sequelize);
+    logger.info("✅ Tenant isolation configured");
+
     // Sync database models
     await sequelize.sync({ alter: true });
     logger.info("📊 Database synced successfully");
+
+    // Initialize usage tracking service
+    logger.info("📊 Initializing usage tracking service...");
+    const usageTrackingService = require("./services/usageTrackingService");
+    await usageTrackingService.initialize();
+    logger.info("✅ Usage tracking service initialized");
 
     // Start periodic health checks
     dbHealthCheck.startPeriodicCheck();

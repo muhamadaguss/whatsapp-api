@@ -4,6 +4,8 @@ const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const UserModel = require("../models/userModel");
 const BlacklistedToken = require("../models/blacklistedTokenModel");
+const Organization = require("../models/organizationModel");
+const organizationService = require("../services/organizationService");
 const { asyncHandler, AppError } = require("../middleware/errorHandler");
 const logger = require("../utils/logger");
 
@@ -12,6 +14,13 @@ const login = asyncHandler(async (req, res) => {
 
   const user = await UserModel.findOne({
     where: { username },
+    include: [
+      {
+        model: Organization,
+        as: "organization",
+        attributes: ["id", "name", "slug", "subscriptionPlan", "subscriptionStatus"],
+      },
+    ],
   });
 
   if (!user || !bcrypt.compareSync(password, user.password)) {
@@ -22,11 +31,29 @@ const login = asyncHandler(async (req, res) => {
     throw new AppError("User is inactive", 401);
   }
 
-  // Enhanced JWT generation with security claims
+  // Check if user has an organization
+  if (!user.organizationId) {
+    throw new AppError(
+      "User is not associated with any organization. Please contact support.",
+      403
+    );
+  }
+
+  // Check if organization is active
+  if (user.organization && user.organization.subscriptionStatus === "suspended") {
+    throw new AppError(
+      "Your organization has been suspended. Please contact support.",
+      403
+    );
+  }
+
+  // Enhanced JWT generation with organization context
   const tokenPayload = {
     id: user.id,
     username: user.username,
     role: user.role,
+    organizationId: user.organizationId,
+    roleInOrg: user.roleInOrg || "member",
     iat: Math.floor(Date.now() / 1000),
     jti: crypto.randomBytes(16).toString("hex"), // JWT ID for tracking
   };
@@ -43,6 +70,7 @@ const login = asyncHandler(async (req, res) => {
     {
       userId: user.id,
       username: user.username,
+      organizationId: user.organizationId,
       ip: req.ip,
       userAgent: req.get("User-Agent"),
     },
@@ -55,13 +83,31 @@ const login = asyncHandler(async (req, res) => {
       id: user.id,
       username: user.username,
       role: user.role,
+      organizationId: user.organizationId,
+      roleInOrg: user.roleInOrg || "member",
+      organization: user.organization
+        ? {
+            id: user.organization.id,
+            name: user.organization.name,
+            slug: user.organization.slug,
+            subscriptionPlan: user.organization.subscriptionPlan,
+            subscriptionStatus: user.organization.subscriptionStatus,
+          }
+        : null,
     },
     expiresIn: tokenOptions.expiresIn,
   });
 });
 
 const register = asyncHandler(async (req, res) => {
-  const { username, password, role } = req.body;
+  const {
+    username,
+    password,
+    role,
+    organizationName,
+    organizationSlug,
+    email,
+  } = req.body;
 
   if (!username || !password || !role) {
     throw new AppError(
@@ -70,9 +116,77 @@ const register = asyncHandler(async (req, res) => {
     );
   }
 
+  // Check if user already exists
+  const existingUser = await UserModel.findOne({ where: { username } });
+  if (existingUser) {
+    throw new AppError("Username already exists", 400);
+  }
+
   const hashed = bcrypt.hashSync(password, 10);
-  const user = await UserModel.create({ username, password: hashed, role });
-  res.status(201).json(user);
+
+  // Create user first without organization
+  const user = await UserModel.create({
+    username,
+    password: hashed,
+    role,
+    isActive: true,
+  });
+
+  // If organization details provided, create organization
+  let organization = null;
+  if (organizationName) {
+    try {
+      organization = await organizationService.createOrganization(
+        {
+          name: organizationName,
+          slug: organizationSlug,
+          email: email || `${username}@example.com`,
+        },
+        user.id
+      );
+
+      // Update user with organization
+      await user.update({
+        organizationId: organization.id,
+        roleInOrg: "owner",
+      });
+
+      logger.info(
+        {
+          userId: user.id,
+          organizationId: organization.id,
+        },
+        "User registered with new organization"
+      );
+    } catch (orgError) {
+      // If organization creation fails, delete the user
+      await user.destroy();
+      throw new AppError(
+        `Failed to create organization: ${orgError.message}`,
+        400
+      );
+    }
+  }
+
+  res.status(201).json({
+    success: true,
+    message: "User registered successfully",
+    user: {
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      organizationId: user.organizationId,
+      roleInOrg: user.roleInOrg,
+    },
+    organization: organization
+      ? {
+          id: organization.id,
+          name: organization.name,
+          slug: organization.slug,
+          subscriptionPlan: organization.subscriptionPlan,
+        }
+      : null,
+  });
 });
 
 const verify = (req, res) => {
