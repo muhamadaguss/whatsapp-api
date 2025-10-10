@@ -40,7 +40,7 @@ router.get(
   "/:id",
   tenantContext,
   withTenantContext,
-  organizationController.getOrganizationById
+  organizationController.getOrganization
 );
 
 /**
@@ -148,7 +148,7 @@ router.post(
   tenantContext,
   withTenantContext,
   requireRole("owner", "admin"),
-  organizationController.addUserToOrganization
+  organizationController.addUser
 );
 
 /**
@@ -161,7 +161,7 @@ router.delete(
   tenantContext,
   withTenantContext,
   requireRole("owner", "admin"),
-  organizationController.removeUserFromOrganization
+  organizationController.removeUser
 );
 
 /**
