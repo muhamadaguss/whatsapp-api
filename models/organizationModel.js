@@ -119,6 +119,7 @@ const Organization = sequelize.define(
     timestamps: true,
     paranoid: true, // Enable soft delete
     tableName: "organizations",
+    underscored: true, // Use snake_case for column names in database
     indexes: [
       {
         fields: ["slug"],

@@ -98,6 +98,7 @@ const SubscriptionPlan = sequelize.define(
   {
     timestamps: true,
     tableName: "subscription_plans",
+    underscored: true, // Use snake_case for column names in database
     indexes: [
       {
         fields: ["name"],

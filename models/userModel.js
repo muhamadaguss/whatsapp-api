@@ -13,6 +13,7 @@ const User = sequelize.define(
   {
     timestamps: true,
     tableName: "users", // Explicitly set table name to 'users'
+    underscored: true, // Use snake_case for column names in database
   }
 );
 

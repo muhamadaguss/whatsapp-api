@@ -69,6 +69,7 @@ const UsageTracking = sequelize.define(
     timestamps: true,
     updatedAt: false, // Only track creation, not updates
     tableName: "usage_tracking",
+    underscored: true, // Use snake_case for column names in database
     indexes: [
       {
         fields: ["organizationId", "metricType"],
