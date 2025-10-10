@@ -7,7 +7,7 @@
  */
 
 const { DataTypes, Op } = require("sequelize");
-const sequelize = require("../config/database");
+const sequelize = require("../models/db");
 const logger = require("../utils/logger");
 
 /**
