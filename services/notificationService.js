@@ -1,7 +1,8 @@
 const nodemailer = require("nodemailer");
 const axios = require("axios");
 const logger = require("../utils/logger");
-const { User, Organization } = require("../models");
+const User = require("../models/userModel");
+const Organization = require("../models/organizationModel");
 
 /**
  * 🔔 Notification Service
