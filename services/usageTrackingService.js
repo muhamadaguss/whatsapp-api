@@ -26,7 +26,7 @@ const UsageMetric = sequelize.define(
       type: DataTypes.UUID,
       allowNull: false,
       references: {
-        model: "Organizations",
+        model: "organizations",
         key: "id",
       },
     },
@@ -53,18 +53,19 @@ const UsageMetric = sequelize.define(
     },
   },
   {
-    tableName: "UsageMetrics",
+    tableName: "usage_metrics",
     timestamps: true,
+    underscored: true, // Use snake_case for column names
     indexes: [
       {
-        fields: ["organizationId", "metricType", "period"],
+        fields: ["organization_id", "metric_type", "period"],
         unique: true,
       },
       {
-        fields: ["organizationId", "period"],
+        fields: ["organization_id", "period"],
       },
       {
-        fields: ["metricType", "period"],
+        fields: ["metric_type", "period"],
       },
     ],
   }
