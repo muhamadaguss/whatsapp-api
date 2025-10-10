@@ -9,12 +9,12 @@ const express = require("express");
 const router = express.Router();
 const organizationController = require("../controllers/organizationController");
 const subscriptionController = require("../controllers/subscriptionController");
-const { authenticate } = require("../middleware/authenticate");
+const { verifyToken } = require("../middleware/authMiddleware");
 const { tenantContext, requireRole } = require("../middleware/tenantContext");
 const { withTenantContext } = require("../middleware/tenantIsolation");
 
 // Apply authentication to all organization routes
-router.use(authenticate);
+router.use(verifyToken);
 
 // ============================================
 // Organization Management Routes
