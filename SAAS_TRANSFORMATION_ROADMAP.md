@@ -99,209 +99,209 @@ Project ini **SANGAT COCOK** untuk dikembangkan menjadi SaaS karena:
 - ✅ Cocok untuk SMB SaaS model
 - ✅ Bisa scale dengan partitioning nanti
 
-### **New Tables:**
+### **Implementation: Sequelize Models + Migrations**
 
-```sql
--- ===================================
--- 1. ORGANIZATIONS (Tenants)
--- ===================================
-CREATE TABLE organizations (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name VARCHAR(255) NOT NULL,
-  slug VARCHAR(100) UNIQUE NOT NULL, -- untuk subdomain/URL
-  email VARCHAR(255) NOT NULL UNIQUE,
-  phone VARCHAR(50),
-  
-  -- Owner info
-  owner_id INTEGER REFERENCES users(id),
-  
-  -- Subscription
-  subscription_plan VARCHAR(50) DEFAULT 'free', -- free, starter, pro, enterprise
-  subscription_status VARCHAR(50) DEFAULT 'active', -- active, suspended, cancelled, trial
-  trial_ends_at TIMESTAMP,
-  subscription_starts_at TIMESTAMP,
-  subscription_ends_at TIMESTAMP,
-  
-  -- Settings
-  settings JSONB DEFAULT '{}',
-  timezone VARCHAR(100) DEFAULT 'Asia/Jakarta',
-  currency VARCHAR(10) DEFAULT 'IDR',
-  
-  -- Status
-  is_active BOOLEAN DEFAULT true,
-  suspended_reason TEXT,
-  suspended_at TIMESTAMP,
-  
-  -- Timestamps
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW(),
-  deleted_at TIMESTAMP
-);
+> **Note:** Kita akan menggunakan Sequelize Models dan Migrations, BUKAN script SQL manual.
 
--- ===================================
--- 2. SUBSCRIPTION PLANS
--- ===================================
-CREATE TABLE subscription_plans (
-  id SERIAL PRIMARY KEY,
-  name VARCHAR(100) NOT NULL UNIQUE, -- Free, Starter, Pro, Enterprise
-  display_name VARCHAR(255) NOT NULL,
-  description TEXT,
-  
-  -- Pricing (untuk referensi, tidak digunakan untuk payment dulu)
-  price_monthly DECIMAL(10, 2) DEFAULT 0,
-  price_yearly DECIMAL(10, 2) DEFAULT 0,
-  currency VARCHAR(10) DEFAULT 'IDR',
-  
-  -- Quotas & Limits
-  quotas JSONB NOT NULL DEFAULT '{
-    "max_whatsapp_accounts": 1,
-    "max_messages_per_month": 1000,
-    "max_campaigns_per_month": 10,
-    "max_contacts": 1000,
-    "max_templates": 5,
-    "max_users": 1,
-    "max_storage_mb": 100,
-    "daily_message_limit": 100,
-    "concurrent_blasts": 1
-  }',
-  
-  -- Features
-  features JSONB DEFAULT '{
-    "spin_text": false,
-    "advanced_analytics": false,
-    "api_access": false,
-    "custom_branding": false,
-    "priority_support": false,
-    "webhook_integration": false,
-    "team_collaboration": false,
-    "advanced_scheduling": false
-  }',
-  
-  -- Order & Display
-  sort_order INTEGER DEFAULT 0,
-  is_visible BOOLEAN DEFAULT true,
-  is_popular BOOLEAN DEFAULT false,
-  
-  -- Timestamps
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
-);
+#### **File Structure:**
+```
+models/
+├── organizationModel.js          # NEW
+├── subscriptionPlanModel.js      # NEW
+├── subscriptionModel.js          # NEW
+├── usageTrackingModel.js         # NEW
+├── quotaAlertModel.js            # NEW
+└── [existing models...]
 
--- ===================================
--- 3. SUBSCRIPTIONS (Active subscriptions)
--- ===================================
-CREATE TABLE subscriptions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-  plan_id INTEGER NOT NULL REFERENCES subscription_plans(id),
-  
-  -- Status
-  status VARCHAR(50) DEFAULT 'active', -- active, cancelled, expired, trial
-  
-  -- Dates
-  starts_at TIMESTAMP NOT NULL,
-  ends_at TIMESTAMP,
-  trial_ends_at TIMESTAMP,
-  cancelled_at TIMESTAMP,
-  
-  -- Billing cycle
-  billing_cycle VARCHAR(20) DEFAULT 'monthly', -- monthly, yearly, lifetime
-  auto_renew BOOLEAN DEFAULT true,
-  
-  -- Metadata
-  metadata JSONB DEFAULT '{}',
-  
-  -- Timestamps
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
-);
+migrations/
+├── YYYYMMDDHHMMSS-create-organizations.js
+├── YYYYMMDDHHMMSS-create-subscription-plans.js
+├── YYYYMMDDHHMMSS-create-subscriptions.js
+├── YYYYMMDDHHMMSS-create-usage-tracking.js
+├── YYYYMMDDHHMMSS-create-quota-alerts.js
+├── YYYYMMDDHHMMSS-add-organization-to-users.js
+├── YYYYMMDDHHMMSS-add-organization-to-sessions.js
+├── YYYYMMDDHHMMSS-add-organization-to-blast-sessions.js
+└── [more migrations...]
 
--- ===================================
--- 4. USAGE TRACKING
--- ===================================
-CREATE TABLE usage_tracking (
-  id BIGSERIAL PRIMARY KEY,
-  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-  
-  -- Usage metrics
-  metric_type VARCHAR(100) NOT NULL, -- messages_sent, whatsapp_accounts, storage_used, api_calls
-  metric_value INTEGER NOT NULL DEFAULT 0,
-  
-  -- Metadata
-  metadata JSONB DEFAULT '{}', -- {sessionId, campaignId, etc}
-  
-  -- Period tracking
-  period_type VARCHAR(20) DEFAULT 'monthly', -- daily, monthly, yearly
-  period_start DATE NOT NULL,
-  period_end DATE NOT NULL,
-  
-  -- Timestamps
-  recorded_at TIMESTAMP DEFAULT NOW(),
-  created_at TIMESTAMP DEFAULT NOW(),
-  
-  -- Indexes for fast queries
-  INDEX idx_usage_org_type (organization_id, metric_type),
-  INDEX idx_usage_period (period_start, period_end)
-);
-
--- ===================================
--- 5. QUOTA ALERTS
--- ===================================
-CREATE TABLE quota_alerts (
-  id SERIAL PRIMARY KEY,
-  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-  
-  -- Alert details
-  quota_type VARCHAR(100) NOT NULL, -- messages, accounts, storage
-  current_usage INTEGER NOT NULL,
-  quota_limit INTEGER NOT NULL,
-  percentage_used DECIMAL(5, 2) NOT NULL,
-  
-  -- Alert level
-  alert_level VARCHAR(50) NOT NULL, -- warning (80%), critical (95%), exceeded (100%)
-  
-  -- Status
-  is_resolved BOOLEAN DEFAULT false,
-  resolved_at TIMESTAMP,
-  
-  -- Notification
-  notification_sent BOOLEAN DEFAULT false,
-  notification_sent_at TIMESTAMP,
-  
-  -- Timestamps
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW()
-);
+seeders/
+└── YYYYMMDDHHMMSS-seed-subscription-plans.js
 ```
 
-### **Modified Existing Tables:**
+### **New Sequelize Models Overview:**
 
-```sql
--- Add organizationId to ALL existing tables
+#### **1. Organization Model** (`organizationModel.js`)
+```javascript
+// Tenant/Company data
+{
+  id: UUID (Primary Key),
+  name: STRING (NOT NULL),
+  slug: STRING (UNIQUE, NOT NULL),
+  email: STRING (UNIQUE, NOT NULL),
+  phone: STRING,
+  ownerId: INTEGER (Foreign Key → users),
+  
+  // Subscription info
+  subscriptionPlan: ENUM('free', 'starter', 'pro', 'enterprise'),
+  subscriptionStatus: ENUM('active', 'suspended', 'cancelled', 'trial'),
+  trialEndsAt: DATE,
+  subscriptionStartsAt: DATE,
+  subscriptionEndsAt: DATE,
+  
+  // Settings
+  settings: JSON,
+  timezone: STRING,
+  currency: STRING,
+  
+  // Status
+  isActive: BOOLEAN,
+  suspendedReason: TEXT,
+  suspendedAt: DATE,
+  
+  // Timestamps (auto)
+  createdAt, updatedAt, deletedAt
+}
+```
 
-ALTER TABLE users ADD COLUMN organization_id UUID REFERENCES organizations(id);
-ALTER TABLE users ADD COLUMN role_in_org VARCHAR(50) DEFAULT 'member'; -- owner, admin, member
-CREATE INDEX idx_users_org ON users(organization_id);
+#### **2. SubscriptionPlan Model** (`subscriptionPlanModel.js`)
+```javascript
+// Plan definitions (Free, Starter, Pro, Enterprise)
+{
+  id: INTEGER (Primary Key),
+  name: STRING (UNIQUE),
+  displayName: STRING,
+  description: TEXT,
+  
+  // Pricing
+  priceMonthly: DECIMAL,
+  priceYearly: DECIMAL,
+  currency: STRING,
+  
+  // Quotas (JSON)
+  quotas: {
+    maxWhatsappAccounts: INTEGER,
+    maxMessagesPerMonth: INTEGER,
+    maxCampaignsPerMonth: INTEGER,
+    maxContacts: INTEGER,
+    maxTemplates: INTEGER,
+    maxUsers: INTEGER,
+    maxStorageMb: INTEGER,
+    dailyMessageLimit: INTEGER,
+    concurrentBlasts: INTEGER
+  },
+  
+  // Features (JSON)
+  features: {
+    spinText: BOOLEAN,
+    advancedAnalytics: BOOLEAN,
+    apiAccess: BOOLEAN,
+    customBranding: BOOLEAN,
+    prioritySupport: BOOLEAN,
+    webhookIntegration: BOOLEAN,
+    teamCollaboration: BOOLEAN,
+    advancedScheduling: BOOLEAN
+  },
+  
+  sortOrder: INTEGER,
+  isVisible: BOOLEAN,
+  isPopular: BOOLEAN
+}
+```
 
-ALTER TABLE sessions ADD COLUMN organization_id UUID REFERENCES organizations(id);
-CREATE INDEX idx_sessions_org ON sessions(organization_id);
+#### **3. Subscription Model** (`subscriptionModel.js`)
+```javascript
+// Active subscriptions
+{
+  id: UUID (Primary Key),
+  organizationId: UUID (Foreign Key → organizations),
+  planId: INTEGER (Foreign Key → subscription_plans),
+  
+  status: ENUM('active', 'cancelled', 'expired', 'trial'),
+  startsAt: DATE,
+  endsAt: DATE,
+  trialEndsAt: DATE,
+  cancelledAt: DATE,
+  
+  billingCycle: ENUM('monthly', 'yearly', 'lifetime'),
+  autoRenew: BOOLEAN,
+  
+  metadata: JSON
+}
+```
 
-ALTER TABLE blast_sessions ADD COLUMN organization_id UUID REFERENCES organizations(id);
-CREATE INDEX idx_blast_sessions_org ON blast_sessions(organization_id);
+#### **4. UsageTracking Model** (`usageTrackingModel.js`)
+```javascript
+// Usage metrics tracking
+{
+  id: BIGINT (Primary Key),
+  organizationId: UUID (Foreign Key → organizations),
+  
+  metricType: STRING, // 'messages_sent', 'whatsapp_accounts', etc
+  metricValue: INTEGER,
+  metadata: JSON,
+  
+  periodType: ENUM('daily', 'monthly', 'yearly'),
+  periodStart: DATE,
+  periodEnd: DATE,
+  
+  recordedAt: DATE
+}
+```
 
-ALTER TABLE blast_messages ADD COLUMN organization_id UUID REFERENCES organizations(id);
-CREATE INDEX idx_blast_messages_org ON blast_messages(organization_id);
+#### **5. QuotaAlert Model** (`quotaAlertModel.js`)
+```javascript
+// Quota alerts (80%, 95%, 100%)
+{
+  id: INTEGER (Primary Key),
+  organizationId: UUID (Foreign Key → organizations),
+  
+  quotaType: STRING,
+  currentUsage: INTEGER,
+  quotaLimit: INTEGER,
+  percentageUsed: DECIMAL,
+  
+  alertLevel: ENUM('warning', 'critical', 'exceeded'),
+  
+  isResolved: BOOLEAN,
+  resolvedAt: DATE,
+  
+  notificationSent: BOOLEAN,
+  notificationSentAt: DATE
+}
+```
 
-ALTER TABLE campaigns ADD COLUMN organization_id UUID REFERENCES organizations(id);
-CREATE INDEX idx_campaigns_org ON campaigns(organization_id);
+### **Modifications to Existing Models:**
 
-ALTER TABLE templates ADD COLUMN organization_id UUID REFERENCES organizations(id);
-CREATE INDEX idx_templates_org ON templates(organization_id);
+#### **All existing models will add:**
+```javascript
+// Add to EVERY existing model
+{
+  organizationId: {
+    type: DataTypes.UUID,
+    allowNull: true, // Allow null for backward compatibility
+    references: {
+      model: 'organizations',
+      key: 'id'
+    },
+    onDelete: 'CASCADE'
+  }
+}
 
-ALTER TABLE chats ADD COLUMN organization_id UUID REFERENCES organizations(id);
-CREATE INDEX idx_chats_org ON chats(organization_id);
+// Add index for performance
+indexes: [
+  {
+    fields: ['organizationId']
+  }
+]
+```
 
--- Dan seterusnya untuk semua tabel...
+#### **User Model - Additional Fields:**
+```javascript
+// userModel.js - Add these fields
+{
+  organizationId: UUID (Foreign Key),
+  roleInOrg: ENUM('owner', 'admin', 'member')
+}
 ```
 
 ---
@@ -426,14 +426,23 @@ CREATE INDEX idx_chats_org ON chats(organization_id);
 
 ### **PHASE 1: Database & Models** (Week 1)
 - [x] Create new branch
-- [ ] Create migration files
-- [ ] Create Organization model
-- [ ] Create SubscriptionPlan model
-- [ ] Create Subscription model
-- [ ] Create UsageTracking model
-- [ ] Create QuotaAlert model
-- [ ] Modify existing models (add organizationId)
-- [ ] Seed initial subscription plans
+- [ ] Create Sequelize models for new tables:
+  - [ ] `organizationModel.js`
+  - [ ] `subscriptionPlanModel.js`
+  - [ ] `subscriptionModel.js`
+  - [ ] `usageTrackingModel.js`
+  - [ ] `quotaAlertModel.js`
+- [ ] Create Sequelize migrations:
+  - [ ] Create organizations table
+  - [ ] Create subscription_plans table
+  - [ ] Create subscriptions table
+  - [ ] Create usage_tracking table
+  - [ ] Create quota_alerts table
+  - [ ] Add organizationId to existing tables (users, sessions, etc)
+- [ ] Update model associations in `associations.js`
+- [ ] Create seeder for subscription plans (Free, Starter, Pro, Enterprise)
+- [ ] Test migrations: `sequelize db:migrate`
+- [ ] Test seeders: `sequelize db:seed:all`
 
 ### **PHASE 2: Backend Core** (Week 2)
 - [ ] Tenant Isolation Middleware
