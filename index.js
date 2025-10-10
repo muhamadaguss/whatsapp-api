@@ -317,8 +317,46 @@ async function initializeDatabase() {
     logger.info("✅ Tenant isolation configured");
 
     // Sync database models
-    await sequelize.sync({ alter: true });
-    logger.info("📊 Database synced successfully");
+    // Note: For production, use proper migrations instead of sync
+    try {
+      await sequelize.sync({ force: false });
+      logger.info("📊 Database synced successfully");
+    } catch (syncError) {
+      // If sync fails due to ALTER TABLE issues, try without alter
+      logger.warn("⚠️ Initial sync failed, attempting recovery...");
+      logger.warn(`Sync error: ${syncError.message}`);
+      
+      // For development: if slug unique constraint fails, we can manually fix it
+      if (syncError.message.includes('slug') && syncError.message.includes('UNIQUE')) {
+        logger.info("🔧 Detected slug UNIQUE constraint issue, applying manual fix...");
+        
+        // Drop the problematic constraint if it exists in wrong format
+        try {
+          await sequelize.query(`
+            DO $$ 
+            BEGIN
+              -- Drop existing slug column if it has issues
+              ALTER TABLE organizations DROP CONSTRAINT IF EXISTS organizations_slug_key;
+            EXCEPTION WHEN undefined_column THEN
+              NULL;
+            END $$;
+          `);
+          
+          // Create proper unique constraint
+          await sequelize.query(`
+            CREATE UNIQUE INDEX IF NOT EXISTS organizations_slug_unique 
+            ON organizations(slug);
+          `);
+          
+          logger.info("✅ Manual constraint fix applied");
+        } catch (fixError) {
+          logger.error("❌ Could not apply manual fix:", fixError.message);
+          throw syncError; // Re-throw original error
+        }
+      } else {
+        throw syncError; // Re-throw if not the specific error we can handle
+      }
+    }
 
     // Initialize usage tracking service
     logger.info("📊 Initializing usage tracking service...");
