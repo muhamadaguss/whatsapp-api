@@ -106,11 +106,11 @@ const SubscriptionPlan = sequelize.define(
         name: "idx_subscription_plans_name",
       },
       {
-        fields: ["isVisible"],
+        fields: ["is_visible"],
         name: "idx_subscription_plans_is_visible",
       },
       {
-        fields: ["sortOrder"],
+        fields: ["sort_order"],
         name: "idx_subscription_plans_sort_order",
       },
     ],
