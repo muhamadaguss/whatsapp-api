@@ -16,6 +16,8 @@ const bodyParser = require("body-parser");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const slowDown = require("express-slow-down");
+const swaggerUi = require("swagger-ui-express");
+const swaggerSpec = require("./config/swagger");
 const whatsappRoutes = require("./routes/whatsappRoutes");
 const authRoutes = require("./routes/authRoutes");
 const downloadRoutes = require("./routes/downloadRoutes");
@@ -214,6 +216,19 @@ app.post("/cleanup/manual", async (req, res) => {
 const path = require("path");
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/media", express.static(path.join(__dirname, "media")));
+
+// Swagger API Documentation
+app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  explorer: true,
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: "WhatsApp SaaS API Docs"
+}));
+
+// Swagger JSON endpoint
+app.get("/api-docs.json", (req, res) => {
+  res.setHeader("Content-Type", "application/json");
+  res.send(swaggerSpec);
+});
 
 app.use("/whatsapp", whatsappRoutes);
 app.use("/auth", authRoutes);

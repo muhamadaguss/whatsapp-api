@@ -21,8 +21,29 @@ router.use(verifyToken);
 // ============================================
 
 /**
- * GET /api/organizations/current
- * Get current user's organization
+ * @swagger
+ * /api/organizations/current:
+ *   get:
+ *     tags: [Organizations]
+ *     summary: Get current organization
+ *     description: Get the organization details for the current user
+ *     responses:
+ *       200:
+ *         description: Organization details retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 organization:
+ *                   $ref: '#/components/schemas/Organization'
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
+ *       404:
+ *         $ref: '#/components/responses/NotFoundError'
  */
 router.get(
   "/current",
@@ -32,9 +53,31 @@ router.get(
 );
 
 /**
- * GET /api/organizations/:id
- * Get organization by ID
- * Requires: User must belong to the organization
+ * @swagger
+ * /api/organizations/{id}:
+ *   get:
+ *     tags: [Organizations]
+ *     summary: Get organization by ID
+ *     description: Get details of a specific organization (user must belong to it)
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *         description: Organization UUID
+ *     responses:
+ *       200:
+ *         description: Organization details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Organization'
+ *       403:
+ *         $ref: '#/components/responses/ForbiddenError'
+ *       404:
+ *         $ref: '#/components/responses/NotFoundError'
  */
 router.get(
   "/:id",
@@ -44,9 +87,53 @@ router.get(
 );
 
 /**
- * POST /api/organizations
- * Create new organization
- * Note: Usually done during registration, but can be used for creating additional orgs
+ * @swagger
+ * /api/organizations:
+ *   post:
+ *     tags: [Organizations]
+ *     summary: Create new organization
+ *     description: Create a new organization (user becomes owner)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *               - email
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: My New Company
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: info@mynewcompany.com
+ *               phone:
+ *                 type: string
+ *                 example: +62812345678
+ *               timezone:
+ *                 type: string
+ *                 example: Asia/Jakarta
+ *               currency:
+ *                 type: string
+ *                 example: IDR
+ *     responses:
+ *       201:
+ *         description: Organization created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 organization:
+ *                   $ref: '#/components/schemas/Organization'
+ *       400:
+ *         description: Invalid input
  */
 router.post(
   "/",
@@ -54,9 +141,43 @@ router.post(
 );
 
 /**
- * PUT /api/organizations/:id
- * Update organization details
- * Requires: owner or admin role
+ * @swagger
+ * /api/organizations/{id}:
+ *   put:
+ *     tags: [Organizations]
+ *     summary: Update organization details
+ *     description: Update organization information (requires owner or admin role)
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: Updated Company Name
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               phone:
+ *                 type: string
+ *               timezone:
+ *                 type: string
+ *               settings:
+ *                 type: object
+ *     responses:
+ *       200:
+ *         description: Organization updated successfully
+ *       403:
+ *         $ref: '#/components/responses/ForbiddenError'
  */
 router.put(
   "/:id",
