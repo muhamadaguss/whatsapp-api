@@ -14,6 +14,11 @@ const logger = require("../utils/logger");
 /**
  * Extract organizationId from authenticated user and add to request
  * Assumes req.user exists (from authentication middleware)
+ * 
+ * Super Admin Behavior:
+ * - If user is super admin, tenant context is optional
+ * - Super admin can access any organization by providing orgId in query/params
+ * - If no orgId provided, super admin has unrestricted access
  */
 const tenantContext = (req, res, next) => {
   try {
@@ -26,10 +31,28 @@ const tenantContext = (req, res, next) => {
       });
     }
 
-    // Extract organizationId from user
-    const { organizationId, roleInOrg, id: userId } = req.user;
+    // Extract user details
+    const { organizationId, roleInOrg, id: userId, isSuperAdmin } = req.user;
 
-    // Check if user has organization
+    // Super Admin: Skip tenant isolation
+    if (isSuperAdmin) {
+      // Super admin can optionally target specific organization
+      const targetOrgId = req.params.orgId || req.query.orgId || req.body.organizationId;
+      
+      req.tenant = {
+        organizationId: targetOrgId || null, // NULL = access all orgs
+        roleInOrg: 'super_admin',
+        userId,
+        isSuperAdmin: true,
+      };
+
+      // Log super admin access
+      logger.info(`Super Admin access: userId=${userId}, targetOrg=${targetOrgId || 'ALL'}`);
+      
+      return next();
+    }
+
+    // Regular User: Require organization
     if (!organizationId) {
       return res.status(403).json({
         success: false,
@@ -43,6 +66,7 @@ const tenantContext = (req, res, next) => {
       organizationId,
       roleInOrg: roleInOrg || "member",
       userId,
+      isSuperAdmin: false,
     };
 
     // Log tenant context for debugging (only in development)
@@ -84,6 +108,9 @@ const optionalTenantContext = (req, res, next) => {
 /**
  * Check if user has specific role in organization
  * Usage: requireRole('owner', 'admin')
+ * 
+ * Super Admin Bypass:
+ * - Super admins automatically pass all role checks
  */
 const requireRole = (...allowedRoles) => {
   return (req, res, next) => {
@@ -93,6 +120,12 @@ const requireRole = (...allowedRoles) => {
         error: "Tenant context required",
         message: "This action requires organization context",
       });
+    }
+
+    // Super admin bypass: always has permission
+    if (req.tenant.isSuperAdmin) {
+      logger.debug(`Super admin bypassing role check for: ${allowedRoles.join(", ")}`);
+      return next();
     }
 
     const { roleInOrg } = req.tenant;
@@ -111,8 +144,32 @@ const requireRole = (...allowedRoles) => {
   };
 };
 
+/**
+ * Require super admin access
+ * Usage: requireSuperAdmin
+ */
+const requireSuperAdmin = (req, res, next) => {
+  if (!req.user || !req.user.isSuperAdmin) {
+    return res.status(403).json({
+      success: false,
+      error: "Super admin required",
+      message: "This action requires platform super administrator privileges",
+    });
+  }
+
+  // Update last admin access timestamp
+  const User = require("../models/userModel");
+  User.update(
+    { lastAdminAccessAt: new Date() },
+    { where: { id: req.user.id } }
+  ).catch(err => logger.error("Failed to update lastAdminAccessAt:", err));
+
+  next();
+};
+
 module.exports = {
   tenantContext,
   optionalTenantContext,
   requireRole,
+  requireSuperAdmin,
 };

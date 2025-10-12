@@ -188,9 +188,26 @@ router.put(
 );
 
 /**
- * POST /api/organizations/:id/suspend
- * Suspend organization
- * Requires: owner role
+ * @swagger
+ * /api/organizations/{id}/suspend:
+ *   post:
+ *     tags: [Organizations]
+ *     summary: Suspend organization
+ *     description: Suspends an organization (requires owner role)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Organization suspended successfully
+ *       403:
+ *         $ref: '#/components/responses/ForbiddenError'
  */
 router.post(
   "/:id/suspend",
@@ -201,9 +218,26 @@ router.post(
 );
 
 /**
- * POST /api/organizations/:id/reactivate
- * Reactivate suspended organization
- * Requires: owner role
+ * @swagger
+ * /api/organizations/{id}/reactivate:
+ *   post:
+ *     tags: [Organizations]
+ *     summary: Reactivate suspended organization
+ *     description: Reactivates a suspended organization (requires owner role)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Organization reactivated successfully
+ *       403:
+ *         $ref: '#/components/responses/ForbiddenError'
  */
 router.post(
   "/:id/reactivate",
@@ -214,9 +248,26 @@ router.post(
 );
 
 /**
- * DELETE /api/organizations/:id
- * Delete organization (soft delete)
- * Requires: owner role
+ * @swagger
+ * /api/organizations/{id}:
+ *   delete:
+ *     tags: [Organizations]
+ *     summary: Delete organization
+ *     description: Soft deletes an organization (requires owner role)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Organization deleted successfully
+ *       403:
+ *         $ref: '#/components/responses/ForbiddenError'
  */
 router.delete(
   "/:id",
@@ -231,9 +282,39 @@ router.delete(
 // ============================================
 
 /**
- * GET /api/organizations/:id/stats
- * Get organization statistics
- * Requires: member access
+ * @swagger
+ * /api/organizations/{id}/stats:
+ *   get:
+ *     tags: [Organizations]
+ *     summary: Get organization statistics
+ *     description: Returns statistics for the organization
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: Organization statistics
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 totalUsers:
+ *                   type: integer
+ *                 activeSessions:
+ *                   type: integer
+ *                 messagesSent:
+ *                   type: integer
+ *                 storageUsed:
+ *                   type: string
+ *       403:
+ *         $ref: '#/components/responses/ForbiddenError'
  */
 router.get(
   "/:id/stats",
@@ -247,9 +328,44 @@ router.get(
 // ============================================
 
 /**
- * GET /api/organizations/:id/users
- * Get all users in organization
- * Requires: member access
+ * @swagger
+ * /api/organizations/{id}/users:
+ *   get:
+ *     tags: [Organizations]
+ *     summary: Get all users in organization
+ *     description: Returns list of users in the organization
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     responses:
+ *       200:
+ *         description: List of users
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 users:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                       username:
+ *                         type: string
+ *                       email:
+ *                         type: string
+ *                       roleInOrg:
+ *                         type: string
+ *       403:
+ *         $ref: '#/components/responses/ForbiddenError'
  */
 router.get(
   "/:id/users",
@@ -259,10 +375,41 @@ router.get(
 );
 
 /**
- * POST /api/organizations/:id/users
- * Add user to organization
- * Requires: owner or admin role
- * Body: { userId, roleInOrg }
+ * @swagger
+ * /api/organizations/{id}/users:
+ *   post:
+ *     tags: [Organizations]
+ *     summary: Add user to organization
+ *     description: Adds a user to the organization (requires owner or admin role)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - userId
+ *               - roleInOrg
+ *             properties:
+ *               userId:
+ *                 type: integer
+ *               roleInOrg:
+ *                 type: string
+ *                 enum: [owner, admin, member]
+ *     responses:
+ *       200:
+ *         description: User added successfully
+ *       403:
+ *         $ref: '#/components/responses/ForbiddenError'
  */
 router.post(
   "/:id/users",
@@ -273,9 +420,31 @@ router.post(
 );
 
 /**
- * DELETE /api/organizations/:id/users/:userId
- * Remove user from organization
- * Requires: owner or admin role
+ * @swagger
+ * /api/organizations/{id}/users/{userId}:
+ *   delete:
+ *     tags: [Organizations]
+ *     summary: Remove user from organization
+ *     description: Removes a user from the organization (requires owner or admin role)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     responses:
+ *       200:
+ *         description: User removed successfully
+ *       403:
+ *         $ref: '#/components/responses/ForbiddenError'
  */
 router.delete(
   "/:id/users/:userId",
@@ -286,10 +455,43 @@ router.delete(
 );
 
 /**
- * PUT /api/organizations/:id/users/:userId/role
- * Update user role in organization
- * Requires: owner role
- * Body: { roleInOrg }
+ * @swagger
+ * /api/organizations/{id}/users/{userId}/role:
+ *   put:
+ *     tags: [Organizations]
+ *     summary: Update user role in organization
+ *     description: Updates a user's role in the organization (requires owner role)
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - roleInOrg
+ *             properties:
+ *               roleInOrg:
+ *                 type: string
+ *                 enum: [owner, admin, member]
+ *     responses:
+ *       200:
+ *         description: User role updated successfully
+ *       403:
+ *         $ref: '#/components/responses/ForbiddenError'
  */
 router.put(
   "/:id/users/:userId/role",
@@ -304,9 +506,24 @@ router.put(
 // ============================================
 
 /**
- * GET /api/organizations/subscriptions/plans
- * Get all available subscription plans
- * No tenant context needed (public plans)
+ * @swagger
+ * /api/organizations/subscriptions/plans:
+ *   get:
+ *     tags: [Subscriptions]
+ *     summary: Get all available subscription plans
+ *     description: Returns all public subscription plans (no authentication required)
+ *     responses:
+ *       200:
+ *         description: List of subscription plans
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 plans:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/SubscriptionPlan'
  */
 router.get(
   "/subscriptions/plans",
@@ -314,9 +531,27 @@ router.get(
 );
 
 /**
- * GET /api/organizations/subscriptions/plans/:planId
- * Get specific plan details
- * No tenant context needed (public plans)
+ * @swagger
+ * /api/organizations/subscriptions/plans/{planId}:
+ *   get:
+ *     tags: [Subscriptions]
+ *     summary: Get specific plan details
+ *     description: Returns details of a specific subscription plan
+ *     parameters:
+ *       - in: path
+ *         name: planId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Plan details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/SubscriptionPlan'
+ *       404:
+ *         $ref: '#/components/responses/NotFoundError'
  */
 router.get(
   "/subscriptions/plans/:planId",
@@ -324,9 +559,26 @@ router.get(
 );
 
 /**
- * GET /api/organizations/subscriptions/current
- * Get current subscription for organization
- * Requires: tenant context
+ * @swagger
+ * /api/organizations/subscriptions/current:
+ *   get:
+ *     tags: [Subscriptions]
+ *     summary: Get current subscription
+ *     description: Returns current subscription for the organization
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Current subscription
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 subscription:
+ *                   $ref: '#/components/schemas/Subscription'
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
  */
 router.get(
   "/subscriptions/current",
@@ -336,9 +588,30 @@ router.get(
 );
 
 /**
- * GET /api/organizations/subscriptions/summary
- * Get subscription summary with usage
- * Requires: tenant context
+ * @swagger
+ * /api/organizations/subscriptions/summary:
+ *   get:
+ *     tags: [Subscriptions]
+ *     summary: Get subscription summary with usage
+ *     description: Returns subscription summary including usage statistics
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Subscription summary
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 subscription:
+ *                   $ref: '#/components/schemas/Subscription'
+ *                 usage:
+ *                   type: object
+ *                 quotas:
+ *                   type: object
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
  */
 router.get(
   "/subscriptions/summary",
@@ -348,9 +621,28 @@ router.get(
 );
 
 /**
- * GET /api/organizations/subscriptions/history
- * Get subscription history
- * Requires: tenant context
+ * @swagger
+ * /api/organizations/subscriptions/history:
+ *   get:
+ *     tags: [Subscriptions]
+ *     summary: Get subscription history
+ *     description: Returns history of all subscriptions for the organization
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Subscription history
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 history:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/Subscription'
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
  */
 router.get(
   "/subscriptions/history",
@@ -360,10 +652,34 @@ router.get(
 );
 
 /**
- * POST /api/organizations/subscriptions
- * Create new subscription
- * Requires: owner role
- * Body: { planId, billingCycle }
+ * @swagger
+ * /api/organizations/subscriptions:
+ *   post:
+ *     tags: [Subscriptions]
+ *     summary: Create new subscription
+ *     description: Creates a new subscription for the organization (requires owner role)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - planId
+ *               - billingCycle
+ *             properties:
+ *               planId:
+ *                 type: string
+ *               billingCycle:
+ *                 type: string
+ *                 enum: [monthly, yearly]
+ *     responses:
+ *       201:
+ *         description: Subscription created successfully
+ *       403:
+ *         $ref: '#/components/responses/ForbiddenError'
  */
 router.post(
   "/subscriptions",
@@ -374,10 +690,33 @@ router.post(
 );
 
 /**
- * POST /api/organizations/subscriptions/upgrade
- * Upgrade subscription
- * Requires: owner role
- * Body: { planId, billingCycle? }
+ * @swagger
+ * /api/organizations/subscriptions/upgrade:
+ *   post:
+ *     tags: [Subscriptions]
+ *     summary: Upgrade subscription
+ *     description: Upgrades current subscription to a higher plan (requires owner role)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - planId
+ *             properties:
+ *               planId:
+ *                 type: string
+ *               billingCycle:
+ *                 type: string
+ *                 enum: [monthly, yearly]
+ *     responses:
+ *       200:
+ *         description: Subscription upgraded successfully
+ *       403:
+ *         $ref: '#/components/responses/ForbiddenError'
  */
 router.post(
   "/subscriptions/upgrade",
@@ -388,10 +727,33 @@ router.post(
 );
 
 /**
- * POST /api/organizations/subscriptions/downgrade
- * Downgrade subscription
- * Requires: owner role
- * Body: { planId, immediate? }
+ * @swagger
+ * /api/organizations/subscriptions/downgrade:
+ *   post:
+ *     tags: [Subscriptions]
+ *     summary: Downgrade subscription
+ *     description: Downgrades current subscription to a lower plan (requires owner role)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - planId
+ *             properties:
+ *               planId:
+ *                 type: string
+ *               immediate:
+ *                 type: boolean
+ *                 description: Apply downgrade immediately or at end of billing period
+ *     responses:
+ *       200:
+ *         description: Subscription downgraded successfully
+ *       403:
+ *         $ref: '#/components/responses/ForbiddenError'
  */
 router.post(
   "/subscriptions/downgrade",
@@ -402,10 +764,29 @@ router.post(
 );
 
 /**
- * POST /api/organizations/subscriptions/cancel
- * Cancel subscription
- * Requires: owner role
- * Body: { reason, immediate? }
+ * @swagger
+ * /api/organizations/subscriptions/cancel:
+ *   post:
+ *     tags: [Subscriptions]
+ *     summary: Cancel subscription
+ *     description: Cancels the current subscription (requires owner role)
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               reason:
+ *                 type: string
+ *               immediate:
+ *                 type: boolean
+ *     responses:
+ *       200:
+ *         description: Subscription cancelled successfully
+ *       403:
+ *         $ref: '#/components/responses/ForbiddenError'
  */
 router.post(
   "/subscriptions/cancel",
@@ -416,9 +797,35 @@ router.post(
 );
 
 /**
- * GET /api/organizations/subscriptions/quotas
- * Get current quotas for organization
- * Requires: tenant context
+ * @swagger
+ * /api/organizations/subscriptions/quotas:
+ *   get:
+ *     tags: [Subscriptions]
+ *     summary: Get current quotas
+ *     description: Returns current quotas and usage for the organization
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Quota information
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 quotas:
+ *                   type: object
+ *                   properties:
+ *                     messagesPerDay:
+ *                       type: integer
+ *                     sessions:
+ *                       type: integer
+ *                     storage:
+ *                       type: string
+ *                 usage:
+ *                   type: object
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
  */
 router.get(
   "/subscriptions/quotas",
@@ -428,9 +835,28 @@ router.get(
 );
 
 /**
- * GET /api/organizations/subscriptions/features
- * Get available features for organization
- * Requires: tenant context
+ * @swagger
+ * /api/organizations/subscriptions/features:
+ *   get:
+ *     tags: [Subscriptions]
+ *     summary: Get available features
+ *     description: Returns list of features available for the organization
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Available features
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 features:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
  */
 router.get(
   "/subscriptions/features",
@@ -440,9 +866,35 @@ router.get(
 );
 
 /**
- * GET /api/organizations/subscriptions/features/:featureName
- * Check if organization has specific feature
- * Requires: tenant context
+ * @swagger
+ * /api/organizations/subscriptions/features/{featureName}:
+ *   get:
+ *     tags: [Subscriptions]
+ *     summary: Check if organization has specific feature
+ *     description: Returns whether the organization has access to a specific feature
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: featureName
+ *         required: true
+ *         schema:
+ *           type: string
+ *         example: advanced_analytics
+ *     responses:
+ *       200:
+ *         description: Feature availability
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 hasFeature:
+ *                   type: boolean
+ *                 feature:
+ *                   type: string
+ *       401:
+ *         $ref: '#/components/responses/UnauthorizedError'
  */
 router.get(
   "/subscriptions/features/:featureName",

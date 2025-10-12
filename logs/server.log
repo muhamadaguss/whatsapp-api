@@ -1,0 +1,76 @@
+
+> whatsapp@1.0.0 start
+> node index.js
+
+[2025-10-12 11:46:19.197 +0700] [32mINFO[39m: [36m🔍 Validating environment variables...[39m
+{"level":30,"time":"2025-10-12T04:46:20.282Z","pid":37792,"hostname":"Muhamads-MacBook-Air.local","class":"baileys","browser":["Ubuntu","Chrome","22.04.4"],"helloMsg":{"clientHello":{"ephemeral":"LP4vGUVd1MZGRx63D+W59swKIpG+jhQ6BNmZhn3rPx0="}},"msg":"connected to WA"}
+[2025-10-12 11:46:19.197 +0700] [32mINFO[39m: [36m✅ Environment validation passed[39m
+[2025-10-12 11:46:19.197 +0700] [32mINFO[39m: [36m📊 Configuration loaded:[39m
+[2025-10-12 11:46:19.197 +0700] [32mINFO[39m: [36m   - Environment: production[39m
+[2025-10-12 11:46:19.197 +0700] [32mINFO[39m: [36m   - Port: 3000[39m
+[2025-10-12 11:46:19.197 +0700] [32mINFO[39m: [36m   - Database: whatsapp_blast@localhost:5432[39m
+[2025-10-12 11:46:19.197 +0700] [32mINFO[39m: [36m   - JWT Secret: ******************************************************************************************************************************** (128 chars)[39m
+[2025-10-12 11:46:19.198 +0700] [32mINFO[39m: [36m🔒 Running production security checks...[39m
+[2025-10-12 11:46:19.198 +0700] [32mINFO[39m: [36m✅ Production security checks passed[39m
+[2025-10-12 11:46:19.760 +0700] [31mERROR[39m: [36m❌ Failed to create email transporter:[39m
+[2025-10-12 11:46:19.857 +0700] [33mWARN[39m: [36mCORS Warning: Localhost origin found in production: http://localhost:8080[39m
+[2025-10-12 11:46:19.857 +0700] [33mWARN[39m: [36mCORS Warning: Insecure HTTP origin in production: http://127.0.0.1:8080[39m
+[2025-10-12 11:46:19.857 +0700] [33mWARN[39m: [36mCORS Warning: Localhost origin found in production: http://localhost:8081[39m
+[2025-10-12 11:46:19.857 +0700] [33mWARN[39m: [36mCORS Warning: Insecure HTTP origin in production: http://127.0.0.1:8081[39m
+[2025-10-12 11:46:19.857 +0700] [32mINFO[39m: [36mCORS Recommendation: Remove localhost origins in production[39m
+[2025-10-12 11:46:19.857 +0700] [32mINFO[39m: [36mCORS Recommendation: Use HTTPS origins in production[39m
+[2025-10-12 11:46:19.857 +0700] [32mINFO[39m: [36mCORS Recommendation: Remove localhost origins in production[39m
+[2025-10-12 11:46:19.857 +0700] [32mINFO[39m: [36mCORS Recommendation: Use HTTPS origins in production[39m
+[2025-10-12 11:46:19.864 +0700] [32mINFO[39m: [36m✅ Database configuration validated[39m
+[2025-10-12 11:46:19.864 +0700] [32mINFO[39m: [36m🔍 Testing database connection...[39m
+[2025-10-12 11:46:19.913 +0700] [32mINFO[39m: [36m✅ Database connection successful[39m
+[2025-10-12 11:46:19.913 +0700] [32mINFO[39m: [36m📋 Loading models...[39m
+[2025-10-12 11:46:19.914 +0700] [32mINFO[39m: [36m🔗 Setting up model associations...[39m
+[2025-10-12 11:46:19.915 +0700] [32mINFO[39m: [36m✅ Associations set up for Session[39m
+[2025-10-12 11:46:19.915 +0700] [32mINFO[39m: [36m✅ Associations set up for Blast[39m
+[2025-10-12 11:46:19.915 +0700] [32mINFO[39m: [36m✅ Associations set up for BlastSession[39m
+[2025-10-12 11:46:19.915 +0700] [32mINFO[39m: [36m✅ Associations set up for Template[39m
+[2025-10-12 11:46:19.916 +0700] [32mINFO[39m: [36m✅ Associations set up for RetryConfiguration[39m
+[2025-10-12 11:46:19.916 +0700] [32mINFO[39m: [36m✅ All models and associations loaded successfully[39m
+[2025-10-12 11:46:19.916 +0700] [32mINFO[39m: [36m🔒 Setting up tenant isolation...[39m
+[2025-10-12 11:46:19.916 +0700] [32mINFO[39m: [36m✅ Tenant isolation hooks setup completed[39m
+[2025-10-12 11:46:19.916 +0700] [32mINFO[39m: [36m✅ Tenant isolation configured[39m
+[2025-10-12 11:46:19.917 +0700] [32mINFO[39m: [36m📊 Database connection validated successfully[39m
+[2025-10-12 11:46:19.917 +0700] [32mINFO[39m: [36mℹ️  Using migrations for schema management[39m
+[2025-10-12 11:46:19.917 +0700] [32mINFO[39m: [36m📊 Initializing usage tracking service...[39m
+[2025-10-12 11:46:19.924 +0700] [32mINFO[39m: [36mUsage tracking service initialized[39m
+[2025-10-12 11:46:19.924 +0700] [32mINFO[39m: [36m✅ Usage tracking service initialized[39m
+[2025-10-12 11:46:19.924 +0700] [32mINFO[39m: [36m🔄 Database health check started (interval: 30000ms)[39m
+[2025-10-12 11:46:19.924 +0700] [32mINFO[39m: [36m🔄 Memuat ulang session: testing[39m
+[2025-10-12 11:46:19.947 +0700] [32mINFO[39m: [36m📋 Session testing already exists in DB with userId: 1[39m
+[2025-10-12 11:46:19.982 +0700] [32mINFO[39m: [36m📱 All existing sessions loaded[39m
+[2025-10-12 11:46:19.982 +0700] [32mINFO[39m: [36m🧹 Starting automatic file cleanup (interval: 3600000ms)[39m
+[2025-10-12 11:46:19.982 +0700] [32mINFO[39m: [36m🧹 Starting file cleanup process[39m
+[2025-10-12 11:46:19.982 +0700] [32mINFO[39m: [36m🧹 File cleanup manager started[39m
+[2025-10-12 11:46:19.983 +0700] [32mINFO[39m: [36m🕐 Starting cron jobs...[39m
+[2025-10-12 11:46:20.011 +0700] [32mINFO[39m: [36m✅ All cron jobs started successfully[39m
+[2025-10-12 11:46:20.011 +0700] [32mINFO[39m: [36m📅 Cron job schedules:[39m
+[2025-10-12 11:46:20.011 +0700] [32mINFO[39m: [36m  • Check Expired Subscriptions: Daily at 00:00[39m
+[2025-10-12 11:46:20.011 +0700] [32mINFO[39m: [36m  • Reset Monthly Usage: 1st day of month at 00:00[39m
+[2025-10-12 11:46:20.011 +0700] [32mINFO[39m: [36m  • Check All Quotas: Every 6 hours[39m
+[2025-10-12 11:46:20.011 +0700] [32mINFO[39m: [36m  • Subscription Reminders: Daily at 09:00[39m
+[2025-10-12 11:46:20.011 +0700] [32mINFO[39m: [36m🕐 Cron jobs started[39m
+[2025-10-12 11:46:20.013 +0700] [32mINFO[39m: [36m🔄 Connection update for session testing: connecting[39m
+[2025-10-12 11:46:20.013 +0700] [31mERROR[39m: [36m💥 Uncaught Exception:[39m
+[2025-10-12 11:46:20.014 +0700] [32mINFO[39m: [36m✅ File cleanup completed[39m
+    duration: "32ms"
+    totalFiles: 0
+    deletedFiles: 0
+    freedSpace: "0 Bytes"
+    errors: 0
+[2025-10-12 11:46:20.284 +0700] [32mINFO[39m: [36m✅ WebSocket opened for session testing[39m
+{"level":30,"time":"2025-10-12T04:46:20.529Z","pid":37792,"hostname":"Muhamads-MacBook-Air.local","class":"baileys","node":{"username":"6281384742399","passive":false,"userAgent":{"platform":"WEB","appVersion":{"primary":2,"secondary":3000,"tertiary":1025190524},"mcc":"000","mnc":"000","osVersion":"0.1","device":"Desktop","osBuildNumber":"0.1","releaseChannel":"RELEASE","localeLanguageIso6391":"en","localeCountryIso31661Alpha2":"US"},"webInfo":{"webSubPlatform":"WEB_BROWSER"},"connectType":"WIFI_UNKNOWN","connectReason":"USER_ACTIVATED","device":22,"pull":true},"msg":"logging in..."}
+{"level":30,"time":"2025-10-12T04:46:20.974Z","pid":37792,"hostname":"Muhamads-MacBook-Air.local","class":"baileys","msg":"handled 0 offline messages/notifications"}
+{"level":30,"time":"2025-10-12T04:46:21.067Z","pid":37792,"hostname":"Muhamads-MacBook-Air.local","class":"baileys","msg":"27 pre-keys found on server"}
+{"level":30,"time":"2025-10-12T04:46:21.309Z","pid":37792,"hostname":"Muhamads-MacBook-Air.local","class":"baileys","msg":"opened connection to WA"}
+[2025-10-12 11:46:20.974 +0700] [32mINFO[39m: [36m🔄 Connection update for session testing: undefined[39m
+[2025-10-12 11:46:21.311 +0700] [32mINFO[39m: [36m🔄 Connection update for session testing: undefined[39m
+[2025-10-12 11:46:21.311 +0700] [32mINFO[39m: [36m🔄 Connection update for session testing: open[39m
+[2025-10-12 11:46:21.318 +0700] [32mINFO[39m: [36m📋 Using existing userId 1 for session testing[39m
+[2025-10-12 11:46:21.328 +0700] [32mINFO[39m: [36m🔄 Connection opened for session testing[39m
+[2025-10-12 11:46:21.328 +0700] [32mINFO[39m: [36m💾 Session testing connected to DB with userId: 1[39m

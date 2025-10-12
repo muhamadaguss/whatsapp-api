@@ -19,6 +19,7 @@ const login = asyncHandler(async (req, res) => {
         model: Organization,
         as: "organization",
         attributes: ["id", "name", "slug", "subscriptionPlan", "subscriptionStatus"],
+        required: false, // LEFT JOIN - allow NULL for super admins
       },
     ],
   });
@@ -31,29 +32,35 @@ const login = asyncHandler(async (req, res) => {
     throw new AppError("User is inactive", 401);
   }
 
-  // Check if user has an organization
-  if (!user.organizationId) {
-    throw new AppError(
-      "User is not associated with any organization. Please contact support.",
-      403
-    );
+  // Super Admin: Skip organization check
+  const isSuperAdmin = user.isSuperAdmin || false;
+
+  if (!isSuperAdmin) {
+    // Regular users must have organization
+    if (!user.organizationId) {
+      throw new AppError(
+        "User is not associated with any organization. Please contact support.",
+        403
+      );
+    }
+
+    // Check if organization is active
+    if (user.organization && user.organization.subscriptionStatus === "suspended") {
+      throw new AppError(
+        "Your organization has been suspended. Please contact support.",
+        403
+      );
+    }
   }
 
-  // Check if organization is active
-  if (user.organization && user.organization.subscriptionStatus === "suspended") {
-    throw new AppError(
-      "Your organization has been suspended. Please contact support.",
-      403
-    );
-  }
-
-  // Enhanced JWT generation with organization context
+  // Enhanced JWT generation with organization context and super admin flag
   const tokenPayload = {
     id: user.id,
     username: user.username,
     role: user.role,
-    organizationId: user.organizationId,
-    roleInOrg: user.roleInOrg || "member",
+    organizationId: user.organizationId || null, // NULL for super admin
+    roleInOrg: user.roleInOrg || (isSuperAdmin ? "super_admin" : "member"),
+    isSuperAdmin: isSuperAdmin,
     iat: Math.floor(Date.now() / 1000),
     jti: crypto.randomBytes(16).toString("hex"), // JWT ID for tracking
   };
@@ -84,7 +91,8 @@ const login = asyncHandler(async (req, res) => {
       username: user.username,
       role: user.role,
       organizationId: user.organizationId,
-      roleInOrg: user.roleInOrg || "member",
+      roleInOrg: user.roleInOrg || (isSuperAdmin ? "super_admin" : "member"),
+      isSuperAdmin: isSuperAdmin,
       organization: user.organization
         ? {
             id: user.organization.id,

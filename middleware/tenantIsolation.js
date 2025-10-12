@@ -46,11 +46,11 @@ const withTenantContext = (req, res, next) => {
     return next();
   }
 
-  const { organizationId, userId, roleInOrg } = req.tenant;
+  const { organizationId, userId, roleInOrg, isSuperAdmin } = req.tenant;
 
   // Run the rest of the request within tenant context
   tenantStorage.run(
-    { organizationId, userId, roleInOrg },
+    { organizationId, userId, roleInOrg, isSuperAdmin: isSuperAdmin || false },
     () => {
       next();
     }
@@ -80,6 +80,12 @@ const setupTenantIsolation = (sequelize) => {
     
     if (!tenant || !tenant.organizationId) {
       // No tenant context, don't apply filter
+      return;
+    }
+
+    // Super Admin Bypass: Skip tenant isolation
+    if (tenant.isSuperAdmin) {
+      logger.debug(`Super admin: Skipping tenant isolation for ${options.model?.name || "query"}`);
       return;
     }
 
@@ -120,6 +126,14 @@ const setupTenantIsolation = (sequelize) => {
       return;
     }
 
+    // Super Admin Bypass: Skip auto-assignment (but allow manual)
+    // Super admin can create records for any organization
+    if (tenant.isSuperAdmin) {
+      logger.debug(`Super admin: Allowing manual organizationId assignment for ${instance.constructor.name}`);
+      // Don't auto-assign, but allow if already set
+      return;
+    }
+
     // Check if model should be isolated
     const modelName = instance.constructor.name;
     if (excludedModels.includes(modelName)) {
@@ -147,6 +161,12 @@ const setupTenantIsolation = (sequelize) => {
   // Hook into beforeBulkCreate to add organizationId
   sequelize.addHook("beforeBulkCreate", (instances, options) => {
     const tenant = getCurrentTenant();
+    
+    // Super Admin Bypass
+    if (tenant && tenant.isSuperAdmin) {
+      logger.debug(`Super admin: Allowing bulk create without auto organizationId`);
+      return;
+    }
     
     if (!tenant || !tenant.organizationId) {
       return;

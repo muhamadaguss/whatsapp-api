@@ -80,6 +80,8 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
       "https://whatsapp-web.jobmarket.my.id",
       "http://localhost:8081",
       "http://127.0.0.1:8081",
+      "http://localhost:3000",
+      "http://127.0.0.1:3000",
     ];
 
 // Generate secure CORS configuration
@@ -309,14 +311,18 @@ async function initializeDatabase() {
     require("./models/organizationModel");
     require("./models/subscriptionPlanModel");
     require("./models/subscriptionModel");
+    require("./models/usageTrackingModel");
+    require("./models/quotaAlertModel");
 
     // Setup model associations
     logger.info("🔗 Setting up model associations...");
     
-    // Get all models from sequelize
-    const models = sequelize.models;
+    // Use centralized associations setup
+    const { setupAssociations } = require("./models/associations");
+    setupAssociations();
     
-    // Setup associations for models that have associate function
+    // Also setup associations for models that have associate function (backward compatibility)
+    const models = sequelize.models;
     Object.keys(models).forEach(modelName => {
       if (models[modelName].associate) {
         models[modelName].associate(models);
@@ -331,46 +337,17 @@ async function initializeDatabase() {
     setupTenantIsolation(sequelize);
     logger.info("✅ Tenant isolation configured");
 
-    // Sync database models
-    // Note: For production, use proper migrations instead of sync
+    // Validate database connection (migrations handle schema)
+    // Note: We use migrations for schema changes, not sync()
     try {
-      await sequelize.sync({ force: false });
-      logger.info("📊 Database synced successfully");
-    } catch (syncError) {
-      // If sync fails due to ALTER TABLE issues, try without alter
-      logger.warn("⚠️ Initial sync failed, attempting recovery...");
-      logger.warn(`Sync error: ${syncError.message}`);
-      
-      // For development: if slug unique constraint fails, we can manually fix it
-      if (syncError.message.includes('slug') && syncError.message.includes('UNIQUE')) {
-        logger.info("🔧 Detected slug UNIQUE constraint issue, applying manual fix...");
-        
-        // Drop the problematic constraint if it exists in wrong format
-        try {
-          await sequelize.query(`
-            DO $$ 
-            BEGIN
-              -- Drop existing slug column if it has issues
-              ALTER TABLE organizations DROP CONSTRAINT IF EXISTS organizations_slug_key;
-            EXCEPTION WHEN undefined_column THEN
-              NULL;
-            END $$;
-          `);
-          
-          // Create proper unique constraint
-          await sequelize.query(`
-            CREATE UNIQUE INDEX IF NOT EXISTS organizations_slug_unique 
-            ON organizations(slug);
-          `);
-          
-          logger.info("✅ Manual constraint fix applied");
-        } catch (fixError) {
-          logger.error("❌ Could not apply manual fix:", fixError.message);
-          throw syncError; // Re-throw original error
-        }
-      } else {
-        throw syncError; // Re-throw if not the specific error we can handle
-      }
+      // Just authenticate the connection, don't sync models
+      // Migrations are the source of truth for schema
+      await sequelize.authenticate();
+      logger.info("📊 Database connection validated successfully");
+      logger.info("ℹ️  Using migrations for schema management");
+    } catch (authError) {
+      logger.error("❌ Database connection failed:", authError.message);
+      throw authError;
     }
 
     // Initialize usage tracking service
