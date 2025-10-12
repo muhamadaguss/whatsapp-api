@@ -4,7 +4,9 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"No tests yet\"",
+    "test": "mocha tests/**/*.test.js --timeout 10000 --exit",
+    "test:isolation": "mocha tests/tenant-isolation.test.js --timeout 10000 --exit",
+    "test:quota": "mocha tests/quota-enforcement.test.js --timeout 10000 --exit",
     "start": "node index.js",
     "migrate:image": "node run-image-migration.js",
     "migrate:whatsapp-session": "node migrations/run-whatsapp-session-migration.js",
@@ -41,6 +43,9 @@
     "xlsx": "^0.18.5"
   },
   "devDependencies": {
-    "sequelize-cli": "^6.6.3"
+    "chai": "^6.2.0",
+    "mocha": "^11.7.4",
+    "sequelize-cli": "^6.6.3",
+    "supertest": "^7.1.4"
   }
 }
