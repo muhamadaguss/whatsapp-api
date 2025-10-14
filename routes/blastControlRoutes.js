@@ -128,20 +128,6 @@ router.get(
 // PHASE 3 - ADVANCED FEATURES ROUTES
 // =============================================================================
 
-// Analytics Routes
-router.get(
-  "/analytics/:sessionId", 
-  asyncHandler(blastControlController.getSessionAnalytics)
-);
-router.get(
-  "/analytics/dashboard/overview", 
-  asyncHandler(blastControlController.getDashboardAnalytics)
-);
-router.get(
-  "/analytics/:sessionId/export", 
-  asyncHandler(blastControlController.exportAnalytics)
-);
-
 // Phone Validation Routes
 router.post(
   "/validation/phone/batch", 

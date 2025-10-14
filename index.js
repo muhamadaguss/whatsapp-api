@@ -228,7 +228,6 @@ app.use("/spin-text", require("./routes/spinTextRoutes"));
 app.use("/blast-control", blastControlRoutes);
 app.use("/api/blast", require("./routes/riskAssessment")); // Risk Assessment API
 app.use("/api/whatsapp", require("./routes/accountHealth")); // Account Health API
-app.use("/api/blast", require("./routes/analytics")); // Analytics API
 
 // Error handling middleware (harus di akhir setelah semua routes)
 app.use(notFound); // 404 handler

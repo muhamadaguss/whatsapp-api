@@ -17,7 +17,6 @@ const BlastRealTimeService = require("../services/blastRealTimeService");
 const blastRealTimeService = new BlastRealTimeService(); // Import real-time service
 
 // Phase 3 Services
-const AnalyticsService = require("../services/analyticsService");
 const PhoneValidationService = require("../services/phoneValidationService");
 const AutoRetryService = require("../services/autoRetryService");
 const BulkOperationsService = require("../services/bulkOperationsService");
@@ -1386,72 +1385,6 @@ const validateSessionPhones = async (req, res) => {
 // =============================================================================
 
 /**
- * Get advanced analytics for a session
- */
-const getSessionAnalytics = async (req, res) => {
-  const { sessionId } = req.params;
-
-  try {
-    const analytics = await AnalyticsService.getSessionAnalytics(sessionId, req.user.id);
-
-    res.json({
-      success: true,
-      data: analytics,
-    });
-  } catch (error) {
-    logger.error(`❌ Failed to get analytics for session ${sessionId}:`, error);
-    throw new AppError(`Failed to get analytics: ${error.message}`, 500);
-  }
-};
-
-/**
- * Get dashboard analytics (multi-session overview)
- */
-const getDashboardAnalytics = async (req, res) => {
-  const { limit = 10 } = req.query;
-
-  try {
-    const analytics = await AnalyticsService.getDashboardAnalytics(req.user.id, parseInt(limit));
-
-    res.json({
-      success: true,
-      data: analytics,
-    });
-  } catch (error) {
-    logger.error(`❌ Failed to get dashboard analytics for user ${req.user.id}:`, error);
-    throw new AppError(`Failed to get dashboard analytics: ${error.message}`, 500);
-  }
-};
-
-/**
- * Export analytics data
- */
-const exportAnalytics = async (req, res) => {
-  const { sessionId } = req.params;
-  const { format = 'csv' } = req.query;
-
-  try {
-    const analytics = await AnalyticsService.getSessionAnalytics(sessionId, req.user.id);
-    
-    if (format === 'csv') {
-      const csvData = AnalyticsService.exportAnalyticsToCSV(analytics);
-      
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename="analytics_${sessionId}.csv"`);
-      res.send(csvData);
-    } else {
-      res.json({
-        success: true,
-        data: analytics,
-      });
-    }
-  } catch (error) {
-    logger.error(`❌ Failed to export analytics for session ${sessionId}:`, error);
-    throw new AppError(`Failed to export analytics: ${error.message}`, 500);
-  }
-};
-
-/**
  * Validate phone numbers (batch)
  */
 const validatePhoneNumbers = async (req, res) => {
@@ -1910,11 +1843,6 @@ module.exports = {
   getSessionStats,
   handleSessionAction,
   validateSessionPhones, // New endpoint
-
-  // Phase 3 - Advanced Analytics
-  getSessionAnalytics,
-  getDashboardAnalytics,
-  exportAnalytics,
 
   // Phase 3 - Phone Validation
   validatePhoneNumbers,
