@@ -15,6 +15,7 @@ class BlastSessionManager {
   /**
    * Create new blast session
    * ========== PHASE 1: ACCOUNT AGE-BASED CONFIGURATION ==========
+   * ✨ OPSI 2: Hanya simpan config yang dikirim user, apply default saat runtime
    * @param {Object} params - Session parameters
    * @param {string} params.accountAge - Account age: 'NEW', 'WARMING', 'ESTABLISHED'
    * @returns {Object} - Created session
@@ -33,27 +34,20 @@ class BlastSessionManager {
       .substring(7)}`;
 
     try {
-      // ⚠️ PHASE 1: Get age-based default config
-      const ageBasedConfig = this.getDefaultConfig(accountAge);
+      // ✨ NEW APPROACH: Store only user-provided config + accountAge
+      // Default config akan di-apply saat execution/query, bukan saat save
+      const userConfig = {
+        ...config,
+        accountAge: config.accountAge || accountAge, // Store account age for later
+      };
       
-      logger.info(`📊 Creating session with accountAge: ${accountAge}`, {
-        contactDelay: ageBasedConfig.contactDelay,
-        dailyLimit: ageBasedConfig.dailyLimit,
-        restDelay: ageBasedConfig.restDelay,
+      logger.info(`📊 Creating session with user config:`, {
+        accountAge: userConfig.accountAge,
+        userProvidedFields: Object.keys(config),
+        configToStore: userConfig,
       });
 
-      // ⚠️ FIX: Deep merge config to properly override nested objects
-      // User config should take priority over age-based defaults
-      const mergedConfig = this.deepMergeConfig(ageBasedConfig, config);
-      
-      logger.info(`📊 User config applied:`, {
-        userContactDelay: config.contactDelay,
-        finalContactDelay: mergedConfig.contactDelay,
-        userDailyLimit: config.dailyLimit,
-        finalDailyLimit: mergedConfig.dailyLimit,
-      });
-
-      // Create session record
+      // Create session record (simpan HANYA user config, tidak merge dengan default)
       const session = await BlastSession.create({
         sessionId,
         userId,
@@ -62,7 +56,7 @@ class BlastSessionManager {
         messageTemplate,
         totalMessages: messageList.length,
         status: "IDLE",
-        config: mergedConfig,
+        config: userConfig, // ✨ Simpan user config saja, tanpa default
       });
 
       // Create message records
@@ -520,6 +514,20 @@ class BlastSessionManager {
       logger.error(`❌ Failed to recover active sessions:`, error);
       throw error;
     }
+  }
+
+  /**
+   * ✨ NEW: Apply runtime config (merge user config dengan default config)
+   * Digunakan saat execution atau query session untuk mendapatkan full config
+   * @param {Object} userConfig - User-provided config dari database
+   * @returns {Object} - Full merged configuration
+   */
+  applyRuntimeConfig(userConfig = {}) {
+    const accountAge = userConfig.accountAge || 'NEW';
+    const defaultConfig = this.getDefaultConfig(accountAge);
+    
+    // Deep merge: user config override default
+    return this.deepMergeConfig(defaultConfig, userConfig);
   }
 
   /**

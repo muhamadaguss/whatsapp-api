@@ -440,7 +440,6 @@ const createBlastSession = async (req, res) => {
     config = {},
     selectTarget,
     inputNumbers,
-    accountAge = 'NEW' // ⚠️ PHASE 1: Accept account age from request, default to ultra-safe NEW
   } = req.body;
 
   const filePath = req.file?.path; // Excel file path from multer
@@ -476,12 +475,6 @@ const createBlastSession = async (req, res) => {
     );
   }
 
-  // ⚠️ PHASE 1: Validate account age parameter
-  const validAccountAges = ['NEW', 'WARMING', 'ESTABLISHED'];
-  if (!validAccountAges.includes(accountAge)) {
-    logger.warn(`⚠️ Invalid accountAge '${accountAge}', defaulting to NEW`);
-  }
-
   let finalMessageList = [];
 
   try {
@@ -506,7 +499,6 @@ const createBlastSession = async (req, res) => {
     }
 
     // Create blast session
-    // ⚠️ PHASE 1: Pass accountAge to get age-appropriate safety configuration
     const result = await blastSessionManager.createSession({
       userId: req.user.id,
       whatsappSessionId,
@@ -514,7 +506,6 @@ const createBlastSession = async (req, res) => {
       messageTemplate,
       messageList: finalMessageList,
       config,
-      accountAge, // ⚠️ PHASE 1: Critical parameter for ban prevention
     });
 
     logger.info(
@@ -587,59 +578,14 @@ const startBlastSession = async (req, res) => {
     
     logger.info(`🚨 PHASE 1 FIX: Pre-validation disabled for session ${sessionId} to prevent ban-triggering patterns`);
     
-    // ⚠️ ORIGINAL CODE COMMENTED OUT - DO NOT REMOVE (for reference & rollback)
-    // try {
-    //   phoneValidationResult = await validateSessionPhoneNumbers(
-    //     sessionId, 
-    //     session.whatsappSessionId, 
-    //     skipPhoneValidation
-    //   );
-    //   if (!skipPhoneValidation && phoneValidationResult.invalidNumbers > 0) {
-    //     await markInvalidNumbersAsFailed(sessionId, phoneValidationResult.details);
-    //     logger.info(`⏳ Waiting 2 seconds to ensure database changes are committed...`);
-    //     await new Promise(resolve => setTimeout(resolve, 2000));
-    //     logger.info(
-    //       `📱 Phone validation completed for session ${sessionId}: ${phoneValidationResult.validNumbers}/${phoneValidationResult.totalMessages} valid numbers. ${phoneValidationResult.invalidNumbers} invalid numbers marked as failed.`
-    //     );
-    //   }
-    // } catch (validationError) {
-    //   if (validationError instanceof AppError) {
-    //     throw validationError;
-    //   }
-    //   logger.warn(`Phone validation failed for session ${sessionId}:`, validationError.message);
-    //   phoneValidationResult = {
-    //     success: false,
-    //     message: `Phone validation failed: ${validationError.message}`,
-    //     totalMessages: 0,
-    //     validNumbers: 0,
-    //     invalidNumbers: 0
-    //   };
-    // }
-    // ⚠️ END OF COMMENTED CODE
-
-    // Check if business hours are enabled and if current time is outside business hours
-    const businessHoursConfig = session.config?.businessHours;
-    logger.info(`[startBlastSession] Session ${sessionId} businessHoursConfig: ${JSON.stringify(businessHoursConfig)}`);
-    const isWithinHours = blastExecutionService.isWithinBusinessHours(businessHoursConfig);
-    logger.info(`[startBlastSession] Session ${sessionId} isWithinBusinessHours: ${isWithinHours}`);
-
-    let isPausedDueToBusinessHours = false; // Initialize flag
-
-    if (
-      businessHoursConfig &&
-      businessHoursConfig.enabled &&
-      !blastExecutionService.isWithinBusinessHours(businessHoursConfig)
-    ) {
       logger.info(`Attempting to emit notification for session ${sessionId} due to business hours.`);
-      getSocket().to(`user_${req.user.id}`).emit("notification", {
-        type: "warning",
-        message: `Blast session ${sessionId} will be paused until business hours (${businessHoursConfig.startHour}:00 - ${businessHoursConfig.endHour}:00).`,
-      });
+      // getSocket().to(`user_${req.user.id}`).emit("notification", {
+      //   type: "warning",
+      //   message: `Blast session ${sessionId} will be paused until business hours (${businessHoursConfig.startHour}:00 - ${businessHoursConfig.endHour}:00).`,
+      // });
       logger.info(
         `⏰ Notification emitted for session ${sessionId}: Blast session will be paused due to business hours.`
       );
-      isPausedDueToBusinessHours = true; // Set flag if condition met
-    }
 
     // Start session
     const result = await blastSessionManager.startSession(sessionId);
@@ -662,7 +608,6 @@ const startBlastSession = async (req, res) => {
       message: successMessage,
       data: {
         ...result, // Include existing result data
-        isPausedDueToBusinessHours: isPausedDueToBusinessHours, // Add the new flag
         phoneValidation: phoneValidationResult, // Include phone validation results
       },
     });
@@ -932,6 +877,13 @@ const getUserBlastSessions = async (req, res) => {
     // Transform data untuk include WhatsApp account information and next message info
     const transformedSessions = await Promise.all(sessions.map(async (session) => {
       const sessionData = session.toJSON();
+      
+      // ✨ APPLY RUNTIME CONFIG: Merge user config dengan default config untuk response
+      sessionData.fullConfig = blastSessionManager.applyRuntimeConfig(sessionData.config);
+      // Keep original user config for reference
+      sessionData.userConfig = sessionData.config;
+      // Replace config dengan fullConfig untuk backward compatibility
+      sessionData.config = sessionData.fullConfig;
       
       // Extract WhatsApp account information
       if (sessionData.whatsappSession) {

@@ -508,7 +508,10 @@ class BlastExecutionService {
 
     try {
       const session = await BlastSession.findOne({ where: { sessionId } });
-      const businessHoursConfig = session.config?.businessHours || {};
+      
+      // ✨ APPLY RUNTIME CONFIG: Merge user config dengan default config
+      const fullConfig = blastSessionManager.applyRuntimeConfig(session.config);
+      const businessHoursConfig = fullConfig.businessHours || {};
 
       while (!executionState.isStopped) {
         // Periodic health check (every 10 messages or every 30 seconds)
@@ -684,16 +687,6 @@ class BlastExecutionService {
           if (isFirstMessage) {
             logger.info(`🚀 First message - sending immediately without delays!`);
           } else {
-            // ❌ PHASE 1 DAY 1: Remove message delay (delay sebelum kirim pesan)
-            // Message delay removed - only contact delay will be used after sending
-            // const messageDelayConfig = session.config?.messageDelay;
-            // if (messageDelayConfig && messageDelayConfig.min && messageDelayConfig.max) {
-            //   const minDelayMs = messageDelayConfig.min * 1000;
-            //   const maxDelayMs = messageDelayConfig.max * 1000;
-            //   const randomDelay = Math.floor(Math.random() * (maxDelayMs - minDelayMs + 1)) + minDelayMs;
-            //   logger.info(`⏳ Applying message delay: ${(randomDelay / 1000).toFixed(1)}s (range: ${messageDelayConfig.min}s-${messageDelayConfig.max}s)`);
-            //   await this.sleep(randomDelay);
-            // }
           }
 
           // Send message
@@ -783,7 +776,8 @@ class BlastExecutionService {
         }
 
         // ✅ PHASE 1 DAY 1: SIMPLIFIED CONTACT DELAY - Pure Random Only
-        const contactDelayConfig = session.config?.contactDelay;
+        // ✨ Use fullConfig instead of session.config
+        const contactDelayConfig = fullConfig.contactDelay;
         
         // 🚀 CHECK IF THIS IS THE LAST MESSAGE - Skip delay if last message was successful
         const queueStatsAfterSend = await messageQueueHandler.getQueueStats(sessionId);
