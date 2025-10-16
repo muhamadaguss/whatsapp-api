@@ -432,7 +432,7 @@ const parseExcelToMessageList = (filePath, selectTarget = null, inputNumbers = n
  * Supports both messageList array and Excel file upload
  */
 const createBlastSession = async (req, res) => {
-  const {
+  let {
     whatsappSessionId,
     campaignName,
     messageTemplate,
@@ -444,6 +444,29 @@ const createBlastSession = async (req, res) => {
   } = req.body;
 
   const filePath = req.file?.path; // Excel file path from multer
+
+  // ✨ FIX: Parse config if it's a JSON string (from FormData)
+  if (typeof config === 'string') {
+    try {
+      config = JSON.parse(config);
+      logger.info('✅ Config parsed from JSON string');
+    } catch (error) {
+      logger.error('❌ Failed to parse config JSON:', error);
+      throw new AppError('Invalid config format', 400);
+    }
+  }
+
+  // ✨ FIX: Parse messageList if it's a JSON string (from FormData)
+  if (typeof messageList === 'string') {
+    try {
+      messageList = JSON.parse(messageList);
+      logger.info('✅ MessageList parsed from JSON string');
+    } catch (error) {
+      logger.error('❌ Failed to parse messageList JSON:', error);
+      // Don't throw error here, as messageList might come from file
+      messageList = null;
+    }
+  }
 
   // Basic validation
   if (!whatsappSessionId || !messageTemplate) {
