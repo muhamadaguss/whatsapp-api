@@ -673,38 +673,21 @@ const resumeBlastSession = async (req, res) => {
       throw new AppError("Blast session not found or access denied", 404);
     }
 
-    // 📱 VALIDATE REMAINING PHONE NUMBERS
-    let phoneValidationResult = null;
-    try {
-      phoneValidationResult = await validateSessionPhoneNumbers(
-        sessionId, 
-        session.whatsappSessionId, 
-        skipPhoneValidation
-      );
-
-      // If validation shows no pending messages, that's actually good
-      if (phoneValidationResult.totalMessages === 0) {
-        phoneValidationResult.message = "No pending messages to validate (all messages processed)";
-      } else if (!skipPhoneValidation && phoneValidationResult.invalidNumbers > 0) {
-        // Mark invalid numbers as failed for resume as well
-        await markInvalidNumbersAsFailed(sessionId, phoneValidationResult.details);
-        
-        logger.info(
-          `📱 Phone validation completed for resume session ${sessionId}: ${phoneValidationResult.validNumbers}/${phoneValidationResult.totalMessages} valid numbers. ${phoneValidationResult.invalidNumbers} invalid numbers marked as failed.`
-        );
-      }
-
-    } catch (validationError) {
-      logger.warn(`Phone validation failed for session ${sessionId}:`, validationError.message);
-      // Continue without validation for resume (less strict than start)
-      phoneValidationResult = {
-        success: false,
-        message: `Phone validation failed: ${validationError.message}`,
-        totalMessages: 0,
-        validNumbers: 0,
-        invalidNumbers: 0
-      };
-    }
+    // � PHASE 1 FIX: DISABLE PRE-VALIDATION TO PREVENT DOUBLE API CALLS
+    // Pre-validation removed to eliminate bulk checking pattern (consistent with startBlastSession)
+    // Validation will be done in execution service (real-time, per message)
+    // This reduces API calls by 50% and removes automation signature
+    let phoneValidationResult = {
+      success: true,
+      message: "Pre-validation disabled (Phase 1 fix - prevents double API calls and bulk checking pattern)",
+      totalMessages: 0,
+      validNumbers: 0,
+      invalidNumbers: 0,
+      details: [],
+      note: "Validation will be performed in execution service during actual send"
+    };
+    
+    logger.info(`🚨 PHASE 1 FIX: Pre-validation disabled for resume session ${sessionId} to prevent ban-triggering patterns`);
 
     // Resume session
     const result = await blastSessionManager.resumeSession(sessionId);
@@ -1198,42 +1181,21 @@ const forceStartBlastSession = async (req, res) => {
       throw new AppError("Blast session not found or access denied", 404);
     }
 
-    // 📱 VALIDATE PHONE NUMBERS FIRST (still validate phones even for force start)
-    let phoneValidationResult = null;
-    try {
-      phoneValidationResult = await validateSessionPhoneNumbers(
-        sessionId,
-        session.whatsappSessionId,
-        skipPhoneValidation
-      );
-
-      // If validation found invalid numbers, mark them as failed in database
-      if (!skipPhoneValidation && phoneValidationResult.invalidNumbers > 0) {
-        await markInvalidNumbersAsFailed(sessionId, phoneValidationResult.details);
-
-        // 🛡️ ADD DELAY to ensure database transaction is committed
-        logger.info(`⏳ Waiting 2 seconds to ensure database changes are committed...`);
-        await new Promise(resolve => setTimeout(resolve, 2000));
-
-        logger.info(
-          `📱 Phone validation completed for force-start session ${sessionId}: ${phoneValidationResult.validNumbers}/${phoneValidationResult.totalMessages} valid numbers. ${phoneValidationResult.invalidNumbers} invalid numbers marked as failed.`
-        );
-      }
-
-    } catch (validationError) {
-      if (validationError instanceof AppError) {
-        throw validationError;
-      }
-      logger.warn(`Phone validation failed for force-start session ${sessionId}:`, validationError.message);
-      // Continue without validation if there's a technical error
-      phoneValidationResult = {
-        success: false,
-        message: `Phone validation failed: ${validationError.message}`,
-        totalMessages: 0,
-        validNumbers: 0,
-        invalidNumbers: 0
-      };
-    }
+    // � PHASE 1 FIX: DISABLE PRE-VALIDATION TO PREVENT DOUBLE API CALLS
+    // Pre-validation removed even for force-start to eliminate bulk checking pattern
+    // Validation will be done in execution service (real-time, per message)
+    // This reduces API calls by 50% and removes automation signature
+    let phoneValidationResult = {
+      success: true,
+      message: "Pre-validation disabled (Phase 1 fix - prevents double API calls and bulk checking pattern)",
+      totalMessages: 0,
+      validNumbers: 0,
+      invalidNumbers: 0,
+      details: [],
+      note: "Validation will be performed in execution service during actual send"
+    };
+    
+    logger.info(`🚨 PHASE 1 FIX: Pre-validation disabled for force-start session ${sessionId} to prevent ban-triggering patterns`);
 
     // Check business hours first (unless forced)
     const businessHoursConfig = session.config?.businessHours;
