@@ -14,10 +14,8 @@ class BlastSessionManager {
 
   /**
    * Create new blast session
-   * ========== PHASE 1: ACCOUNT AGE-BASED CONFIGURATION ==========
-   * ✨ OPSI 2: Hanya simpan config yang dikirim user, apply default saat runtime
+   * ✨ OPTIMIZED: Hanya simpan config yang dikirim user, apply default saat runtime
    * @param {Object} params - Session parameters
-   * @param {string} params.accountAge - Account age: 'NEW', 'WARMING', 'ESTABLISHED'
    * @returns {Object} - Created session
    */
   async createSession({
@@ -27,22 +25,17 @@ class BlastSessionManager {
     messageTemplate,
     messageList,
     config = {},
-    accountAge = 'NEW', // ⚠️ PHASE 1: Default to ultra-safe NEW mode
   }) {
     const sessionId = `blast_${Date.now()}_${Math.random()
       .toString(36)
       .substring(7)}`;
 
     try {
-      // ✨ NEW APPROACH: Store only user-provided config + accountAge
-      // Default config akan di-apply saat execution/query, bukan saat save
-      const userConfig = {
-        ...config,
-        accountAge: config.accountAge || accountAge, // Store account age for later
-      };
+      // ✨ STORE ONLY USER CONFIG (no default merging at storage time)
+      // Default config akan di-apply saat execution/query via applyRuntimeConfig()
+      const userConfig = { ...config };
       
       logger.info(`📊 Creating session with user config:`, {
-        accountAge: userConfig.accountAge,
         userProvidedFields: Object.keys(config),
         configToStore: userConfig,
       });
@@ -523,6 +516,8 @@ class BlastSessionManager {
    * @returns {Object} - Full merged configuration
    */
   applyRuntimeConfig(userConfig = {}) {
+    // Use accountAge from userConfig if provided, otherwise default to 'NEW' for safety
+    // User can explicitly set accountAge in their config if they want specific age-based defaults
     const accountAge = userConfig.accountAge || 'NEW';
     const defaultConfig = this.getDefaultConfig(accountAge);
     
@@ -562,8 +557,8 @@ class BlastSessionManager {
 
   /**
    * Get default configuration with account age-based safety settings
-   * ========== PHASE 1: ACCOUNT AGE-BASED DELAYS (BAN PREVENTION) ==========
-   * @param {string} accountAge - Age category: 'NEW' (0-7 days), 'WARMING' (8-30 days), 'ESTABLISHED' (30+ days)
+   * ✨ User dapat set accountAge di config mereka untuk custom defaults
+   * @param {string} accountAge - Optional age category: 'NEW' (0-7 days), 'WARMING' (8-30 days), 'ESTABLISHED' (30+ days)
    * @returns {Object} - Default config optimized for account age
    */
   getDefaultConfig(accountAge = 'NEW') {
@@ -614,8 +609,6 @@ class BlastSessionManager {
         maxRetries: 3,
         retryDelay: 60, // seconds
       },
-      // Store account age for logging/monitoring
-      accountAge: accountAge,
     };
   }
 
