@@ -13,49 +13,43 @@ const MessageStatusModel = require("../models/messageStatusModel");
 const ChatMessageModel = require("../models/chatModel");
 const logger = require("../utils/logger");
 const { getSocket } = require("./socket");
-
-const sessions = {}; // sessionId => { sock, qr }
-const qrWaiters = {}; // sessionId => [resolveFn1, resolveFn2, ...]
-
+const sessions = {};
+const qrWaiters = {};
 const statusPriority = {
   sent: 1,
   delivered: 2,
   read: 3,
 };
-
-// ✨ Helper function to check if session already exists and get its info
 async function checkSessionExists(sessionId, expectedUserId = null) {
   try {
-    const existingSession = await SessionModel.findOne({ 
-      where: { sessionId } 
+    const existingSession = await SessionModel.findOne({
+      where: { sessionId },
     });
-    
     if (!existingSession) {
       return { exists: false, session: null };
     }
-    
-    // If expectedUserId is provided and different from existing, return conflict
-    if (expectedUserId && existingSession.userId && existingSession.userId !== expectedUserId) {
-      return { 
-        exists: true, 
-        session: existingSession, 
+    if (
+      expectedUserId &&
+      existingSession.userId &&
+      existingSession.userId !== expectedUserId
+    ) {
+      return {
+        exists: true,
+        session: existingSession,
         conflict: true,
-        message: `Session ${sessionId} sudah ada dengan userId berbeda (${existingSession.userId})` 
+        message: `Session ${sessionId} sudah ada dengan userId berbeda (${existingSession.userId})`,
       };
     }
-    
-    return { 
-      exists: true, 
-      session: existingSession, 
-      conflict: false 
+    return {
+      exists: true,
+      session: existingSession,
+      conflict: false,
     };
   } catch (error) {
     logger.error(`❌ Error checking session existence: ${error.message}`);
     return { exists: false, session: null, error: error.message };
   }
 }
-
-// Helper function to get readable status code description
 function getStatusCodeDescription(statusCode) {
   const statusDescriptions = {
     [DisconnectReason.connectionClosed]: "Koneksi ditutup",
@@ -70,17 +64,13 @@ function getStatusCodeDescription(statusCode) {
     [DisconnectReason.multideviceMismatch]: "Ketidakcocokan multi-device",
     [DisconnectReason.forbidden]: "Akses ditolak/diblokir",
   };
-
   const description = statusDescriptions[statusCode];
   return description
     ? `${statusCode} (${description})`
     : `${statusCode} (Status tidak dikenal)`;
 }
-
-// Helper function to ensure sessions directory exists with proper permissions
 function ensureSessionsDirectory() {
   const sessionsDir = path.resolve("./sessions");
-  // const sessionsDir = path.resolve("/app/sessions");
   try {
     if (!fs.existsSync(sessionsDir)) {
       fs.mkdirSync(sessionsDir, { recursive: true, mode: 0o755 });
@@ -90,8 +80,6 @@ function ensureSessionsDirectory() {
     logger.error(`❌ Failed to create sessions directory:`, err.message);
   }
 }
-
-// Helper function to check if we can write to a directory
 function canWriteToDirectory(dirPath) {
   try {
     fs.accessSync(dirPath, fs.constants.W_OK);
@@ -100,60 +88,47 @@ function canWriteToDirectory(dirPath) {
     return false;
   }
 }
-
 async function startWhatsApp(sessionId, userId = null) {
   const io = getSocket();
-
-  // ✨ Check if session already exists in database
   const sessionCheck = await checkSessionExists(sessionId, userId);
-  
   if (sessionCheck.conflict) {
     logger.error(`❌ Session conflict: ${sessionCheck.message}`);
     throw new Error(sessionCheck.message);
   }
-  
   if (sessionCheck.exists) {
-    logger.info(`📋 Session ${sessionId} already exists in DB with userId: ${sessionCheck.session.userId}`);
-    // Use existing userId from database
+    logger.info(
+      `📋 Session ${sessionId} already exists in DB with userId: ${sessionCheck.session.userId}`
+    );
     userId = sessionCheck.session.userId;
   }
-
-  // Ensure sessions directory exists
   ensureSessionsDirectory();
-
   const sessionFolder = path.resolve(`./sessions/${sessionId}`);
-  // const sessionFolder = path.resolve(`/app/sessions/${sessionId}`);
-  // Check if we can write to sessions directory
   const sessionsDir = path.resolve("./sessions");
-  // const sessionsDir = path.resolve("/app/sessions");
   if (!canWriteToDirectory(sessionsDir)) {
     logger.warn(`⚠️ Cannot write to sessions directory: ${sessionsDir}`);
   }
-
-  // Reuse active session if already connected
   const existingSession = sessions[sessionId];
   if (existingSession?.sock?.user) {
     logger.info(`🔁 Session ${sessionId} sudah aktif`);
     return;
   }
-
   const { state, saveCreds } = await useMultiFileAuthState(sessionFolder);
-  // const { version } = await fetchLatestBaileysVersion();
-  const WA_VERSION = [2, 3000, 1025190524];
+  const WA_VERSION = [2, 3000, 1027934701];
   const sock = makeWASocket({
     version: WA_VERSION,
     auth: state,
     markOnlineOnConnect: false,
   });
-
   sessions[sessionId] = { sock, qr: null };
-
   sock.ev.on("creds.update", (creds) => {
     try {
       saveCreds(creds);
       logger.debug(`🔐 Credentials updated for session ${sessionId}`);
     } catch (error) {
-      logger.error(`❌ Error saving credentials for session ${sessionId}:`, error);
+      logger.error(
+        `❌ Error saving credentials for session ${sessionId}:`,
+        error
+      );
     }
   });
   sock.ev.on("connection.update", (update) => {
@@ -164,22 +139,18 @@ async function startWhatsApp(sessionId, userId = null) {
       );
     });
   });
-
-  // Monitor WebSocket connection state
   if (sock.ws) {
     sock.ws.on("close", (code, reason) => {
       logger.warn(
         `🔌 WebSocket closed for session ${sessionId}: ${code} - ${reason}`
       );
     });
-
     sock.ws.on("error", (error) => {
       logger.error(
         `❌ WebSocket error for session ${sessionId}:`,
         error.message
       );
     });
-
     sock.ws.on("open", () => {
       logger.info(`✅ WebSocket opened for session ${sessionId}`);
     });
@@ -188,9 +159,8 @@ async function startWhatsApp(sessionId, userId = null) {
     logger.info(`📨 RECEIVED messages.upsert event for session ${sessionId}:`, {
       messageCount: msgUpdate.messages?.length || 0,
       type: msgUpdate.type,
-      hasMessages: !!msgUpdate.messages
+      hasMessages: !!msgUpdate.messages,
     });
-    
     handleMessagesUpsert(msgUpdate, sessionId).catch((err) => {
       logger.error(
         `❌ Error handling messages upsert for session ${sessionId}:`,
@@ -198,8 +168,6 @@ async function startWhatsApp(sessionId, userId = null) {
       );
     });
   });
-
-  // Listen for contact updates
   sock.ev.on("contacts.update", (contactUpdates) => {
     try {
       for (const contact of contactUpdates) {
@@ -219,8 +187,6 @@ async function startWhatsApp(sessionId, userId = null) {
       );
     }
   });
-
-  // Listen for chats update (might contain contact names)
   sock.ev.on("chats.update", (chatUpdates) => {
     try {
       for (const chat of chatUpdates) {
@@ -241,11 +207,8 @@ async function startWhatsApp(sessionId, userId = null) {
     }
   });
 }
-
-// Helper function to get contact name
 async function getContactName(sock, jid) {
   try {
-    // Method 1: Try to get from contact store (most reliable)
     if (sock.store && sock.store.contacts && sock.store.contacts[jid]) {
       const contact = sock.store.contacts[jid];
       if (contact.name && contact.name.trim()) {
@@ -255,8 +218,6 @@ async function getContactName(sock, jid) {
         return contact.name.trim();
       }
     }
-
-    // Method 2: Try to get from chat metadata
     if (sock.store && sock.store.chats) {
       const chat = sock.store.chats[jid];
       if (chat && chat.name && chat.name.trim()) {
@@ -264,8 +225,6 @@ async function getContactName(sock, jid) {
         return chat.name.trim();
       }
     }
-
-    // Method 3: Try to get profile name (for individual contacts)
     try {
       const profile = await sock.fetchProfile(jid);
       if (profile && profile.name && profile.name.trim()) {
@@ -275,8 +234,6 @@ async function getContactName(sock, jid) {
     } catch (profileError) {
       logger.debug(`Could not fetch profile for ${jid}:`, profileError.message);
     }
-
-    // Method 4: Try business profile (for business accounts)
     try {
       const businessProfile = await sock.getBusinessProfile(jid);
       if (
@@ -295,37 +252,29 @@ async function getContactName(sock, jid) {
         businessError.message
       );
     }
-
-    // Method 5: Try to get from presence (sometimes contains name)
     try {
       const presence = await sock.presenceSubscribe(jid);
-      // This is mainly for subscribing to presence updates, name might be available later
     } catch (presenceError) {
       logger.debug(
         `Could not subscribe to presence for ${jid}:`,
         presenceError.message
       );
     }
-
-    // Fallback: extract phone number from JID
     const phoneNumber = jid.split("@")[0];
     logger.info(`📞 Using phone number as fallback: ${phoneNumber} for ${jid}`);
     return phoneNumber;
   } catch (error) {
     logger.warn(`⚠️ Error getting contact name for ${jid}:`, error.message);
-    // Fallback: return phone number
     return jid.split("@")[0];
   }
 }
-
-// Enhanced function to get detailed contact information
 async function getContactDetails(sock, jid) {
   try {
     const phoneNumber = jid.split("@")[0];
     const contactDetails = {
       jid: jid,
       phoneNumber: phoneNumber,
-      name: phoneNumber, // Default fallback
+      name: phoneNumber,
       profilePicture: null,
       status: null,
       businessProfile: null,
@@ -336,8 +285,6 @@ async function getContactDetails(sock, jid) {
       verifiedName: null,
       pushName: null,
     };
-
-    // Check if number is on WhatsApp
     try {
       const onWhatsAppResult = await sock.onWhatsApp(jid);
       if (onWhatsAppResult && onWhatsAppResult.length > 0) {
@@ -347,8 +294,6 @@ async function getContactDetails(sock, jid) {
     } catch (error) {
       logger.warn(`Could not check WhatsApp status for ${jid}:`, error.message);
     }
-
-    // Get contact name from store
     try {
       const contact = sock.store?.contacts?.[jid];
       if (contact) {
@@ -361,28 +306,20 @@ async function getContactDetails(sock, jid) {
         error.message
       );
     }
-
-    // Get profile picture
     try {
       const profilePicUrl = await sock.profilePictureUrl(jid, "image");
       contactDetails.profilePicture = profilePicUrl;
     } catch (error) {
-      // Profile picture might not exist, that's okay
       logger.debug(`No profile picture for ${jid}`);
     }
-
-    // Get status
     try {
       const status = await sock.fetchStatus(jid);
       if (status && status.status) {
         contactDetails.status = status.status;
       }
     } catch (error) {
-      // Status might be private, that's okay
       logger.debug(`Could not fetch status for ${jid}`);
     }
-
-    // Get business profile if it's a business account
     try {
       const businessProfile = await sock.getBusinessProfile(jid);
       if (businessProfile) {
@@ -402,11 +339,8 @@ async function getContactDetails(sock, jid) {
         }
       }
     } catch (error) {
-      // Not a business account, that's okay
       logger.debug(`No business profile for ${jid}`);
     }
-
-    // Get presence (last seen)
     try {
       await sock.presenceSubscribe(jid);
       const presence = sock.store?.presences?.[jid];
@@ -419,11 +353,9 @@ async function getContactDetails(sock, jid) {
     } catch (error) {
       logger.debug(`Could not get presence for ${jid}`);
     }
-
     return contactDetails;
   } catch (error) {
     logger.error(`❌ Error getting contact details for ${jid}:`, error.message);
-    // Return basic fallback
     return {
       jid: jid,
       phoneNumber: jid.split("@")[0],
@@ -440,91 +372,65 @@ async function getContactDetails(sock, jid) {
     };
   }
 }
-
-// Cache for contact names to avoid repeated API calls
 const contactNameCache = new Map();
-const CACHE_DURATION = 30 * 60 * 1000; // 30 minutes
-
-// Enhanced function to get contact name with caching
+const CACHE_DURATION = 30 * 60 * 1000;
 async function getContactNameWithCache(sock, jid) {
-  // Check cache first
   const cacheKey = `${sock.user?.id || "unknown"}_${jid}`;
   const cached = contactNameCache.get(cacheKey);
-
   if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
     return cached.name;
   }
-
-  // Get fresh contact name
   const contactName = await getContactName(sock, jid);
-
-  // Cache the result
   contactNameCache.set(cacheKey, {
     name: contactName,
     timestamp: Date.now(),
   });
-
   return contactName;
 }
-
 async function handleMessagesUpsert(msgUpdate, sessionId) {
   try {
     const messages = msgUpdate.messages;
     const sock = sessions[sessionId]?.sock;
-
-    logger.info(`📨 Processing ${messages.length} messages for session ${sessionId}`);
-
+    logger.info(
+      `📨 Processing ${messages.length} messages for session ${sessionId}`
+    );
     for (const msg of messages) {
       try {
-        if (!msg.message) continue; // Skip if no message content
-
+        if (!msg.message) continue;
         const from = msg.key.remoteJid;
         const isFromMe = msg.key.fromMe;
         let text = "[Non-text message]";
         let messageType = "text";
         let mediaUrl = null;
-
         const messageTypeDetected = getContentType(msg.message);
-
-        // === TEXT MESSAGE ===
         if (msg.message?.conversation) {
           text = msg.message.conversation;
           messageType = "text";
         } else if (msg.message?.extendedTextMessage?.text) {
           text = msg.message.extendedTextMessage.text;
           messageType = "text";
-        }
-
-        // === IMAGE MESSAGE ===
-        else if (msg.message?.imageMessage) {
+        } else if (msg.message?.imageMessage) {
           text = msg.message.imageMessage.caption || "[Image]";
           messageType = "image";
-
-          // Only download and save images from personal chats (not groups/newsletters)
           const isPrivateChat = from.endsWith("@s.whatsapp.net");
           const ENABLE_IMAGE_DOWNLOAD = true;
-
           if (ENABLE_IMAGE_DOWNLOAD && isPrivateChat) {
             try {
               logger.info(
                 `📷 Attempting to download image from personal chat: ${from}`
               );
-
               const buffer = await downloadMediaMessage(
                 msg,
                 "buffer",
                 {},
                 { reuploadRequest: sock.updateMediaMessage }
               );
-
               if (buffer && buffer.length > 0) {
-                // Create media directory for received media
                 const mediaDir = path.join(__dirname, "../media");
                 if (!fs.existsSync(mediaDir)) {
                   fs.mkdirSync(mediaDir, { recursive: true });
                   logger.info(`📁 Created media directory: ${mediaDir}`);
                 }
-
                 let extension = "jpg";
                 if (msg.message.imageMessage.mimetype) {
                   const mimeType = msg.message.imageMessage.mimetype;
@@ -532,12 +438,10 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
                   else if (mimeType.includes("gif")) extension = "gif";
                   else if (mimeType.includes("webp")) extension = "webp";
                 }
-
                 const fileName = `image_${Date.now()}_${Math.random()
                   .toString(36)
                   .substring(7)}.${extension}`;
                 const filePath = path.join(mediaDir, fileName);
-
                 fs.writeFileSync(filePath, buffer);
                 mediaUrl = `/media/${fileName}`;
                 logger.info(
@@ -566,22 +470,15 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
               `📷 Skipping image download from group/newsletter: ${from}`
             );
           }
-        }
-
-        // === VIDEO MESSAGE ===
-        else if (msg.message?.videoMessage) {
+        } else if (msg.message?.videoMessage) {
           text = msg.message.videoMessage.caption || "[Video]";
           messageType = "video";
-
-          // Only download and save videos from personal chats (not groups/newsletters)
           const isPrivateChat = from.endsWith("@s.whatsapp.net");
-
           if (isPrivateChat) {
             try {
               logger.info(
                 `🎥 Attempting to download video from personal chat: ${from}`
               );
-
               const buffer = await downloadMediaMessage(
                 msg,
                 "buffer",
@@ -619,22 +516,15 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
               `🎥 Skipping video download from group/newsletter: ${from}`
             );
           }
-        }
-
-        // === AUDIO MESSAGE ===
-        else if (msg.message?.audioMessage) {
+        } else if (msg.message?.audioMessage) {
           text = "[Audio]";
           messageType = "audio";
-
-          // Only download and save audio from personal chats (not groups/newsletters)
           const isPrivateChat = from.endsWith("@s.whatsapp.net");
-
           if (isPrivateChat) {
             try {
               logger.info(
                 `🎵 Attempting to download audio from personal chat: ${from}`
               );
-
               const buffer = await downloadMediaMessage(
                 msg,
                 "buffer",
@@ -672,24 +562,17 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
               `🎵 Skipping audio download from group/newsletter: ${from}`
             );
           }
-        }
-
-        // === DOCUMENT MESSAGE ===
-        else if (msg.message?.documentMessage) {
+        } else if (msg.message?.documentMessage) {
           text = `[Document: ${
             msg.message.documentMessage.fileName || "Unknown"
           }]`;
           messageType = "document";
-
-          // Only download and save documents from personal chats (not groups/newsletters)
           const isPrivateChat = from.endsWith("@s.whatsapp.net");
-
           if (isPrivateChat) {
             try {
               logger.info(
                 `📄 Attempting to download document from personal chat: ${from}`
               );
-
               const buffer = await downloadMediaMessage(
                 msg,
                 "buffer",
@@ -729,17 +612,11 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
             );
           }
         }
-
-        // === GET CONTACT NAME ===
         const contactName = await getContactNameWithCache(sock, from);
-
         logger.info(`📩 Chat from ${contactName} (${from}): ${text}`);
-
-        // === SAVE ONLY PRIVATE CHAT (NOT GROUP / NOT NEWSLETTER) ===
         const isPrivateChat = from.endsWith("@s.whatsapp.net");
         const isGroup = from.includes("@g.us");
         const isNewsletter = from.includes("@newsletter");
-
         logger.info(`💾 Processing message for session ${sessionId}:`, {
           from,
           isPrivateChat,
@@ -747,13 +624,12 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
           isNewsletter,
           text: text?.substring(0, 50),
           messageId: msg.key.id,
-          messageType
+          messageType,
         });
-
         if (isPrivateChat && text !== "[Non-text message]") {
           try {
             const messageData = {
-              messageId: msg.key.id, // ✨ FIXED: Use WhatsApp message ID for deduplication
+              messageId: msg.key.id,
               sessionId: sessionId || "unknown",
               from: from || "unknown",
               contactName: contactName,
@@ -766,48 +642,44 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
               fromMe: Boolean(isFromMe),
               isRead: Boolean(isFromMe),
             };
-
-            // ✨ FIXED: Use upsert to prevent duplicate messages
-            const [chatMessage, created] = await ChatMessageModel.upsert(messageData, {
-              returning: true,
-              conflictFields: ['messageId']
-            });
-
+            const [chatMessage, created] = await ChatMessageModel.upsert(
+              messageData,
+              {
+                returning: true,
+                conflictFields: ["messageId"],
+              }
+            );
             if (!created) {
               logger.info(`🔄 Duplicate message ignored: ${msg.key.id}`);
-              // Don't skip - we still need to emit to socket for real-time updates
             }
-
             const io = getSocket();
-            
-            // Get userId from session to send message to correct user room
             const sessionData = await SessionModel.findOne({
               where: { sessionId },
-              attributes: ['userId']
+              attributes: ["userId"],
             });
-            
             logger.info(`🔍 Session lookup for real-time message:`, {
               sessionId,
               sessionDataFound: !!sessionData,
               userId: sessionData?.userId,
               messageId: msg.key.id,
               from,
-              text: text?.substring(0, 50)
+              text: text?.substring(0, 50),
             });
-            
             if (sessionData?.userId) {
-              logger.info(`📡 EMITTING socket event to user_${sessionData.userId}:`, {
-                event: 'new_message',
-                sessionId,
-                from,
-                contactName,
-                text: text?.substring(0, 50),
-                messageType,
-                timestamp: new Date(Number(msg.messageTimestamp) * 1000),
-                fromMe: isFromMe,
-                isDuplicate: !created
-              });
-
+              logger.info(
+                `📡 EMITTING socket event to user_${sessionData.userId}:`,
+                {
+                  event: "new_message",
+                  sessionId,
+                  from,
+                  contactName,
+                  text: text?.substring(0, 50),
+                  messageType,
+                  timestamp: new Date(Number(msg.messageTimestamp) * 1000),
+                  fromMe: isFromMe,
+                  isDuplicate: !created,
+                }
+              );
               io.to(`user_${sessionData.userId}`).emit("new_message", {
                 sessionId,
                 from,
@@ -819,21 +691,57 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
                 fromMe: isFromMe,
                 isRead: Boolean(isFromMe),
               });
-
               logger.info(
-                `✅ Real-time message sent to user_${sessionData.userId} from ${contactName} (${from}) - ${created ? 'NEW' : 'DUPLICATE'}`
+                `✅ Real-time message sent to user_${
+                  sessionData.userId
+                } from ${contactName} (${from}) - ${
+                  created ? "NEW" : "DUPLICATE"
+                }`
               );
             } else {
-              logger.error(`❌ CRITICAL: Could not find userId for session ${sessionId}, skipping real-time update`, {
-                sessionId,
-                sessionData,
-                availableSessions: Object.keys(sessions)
-              });
+              logger.error(
+                `❌ CRITICAL: Could not find userId for session ${sessionId}, skipping real-time update`,
+                {
+                  sessionId,
+                  sessionData,
+                  availableSessions: Object.keys(sessions),
+                }
+              );
             }
-
             logger.info(
               `💾 Chat message saved to database from ${contactName} (${from})`
             );
+
+            // AUTO-REPLY: Handle incoming message for auto-reply (only if not from me)
+            if (
+              !isFromMe &&
+              messageType === "text" &&
+              text &&
+              text !== "[Non-text message]"
+            ) {
+              try {
+                const AutoReplyService = require("../services/autoReplyService");
+                logger.info(`🤖 Triggering auto-reply handler for ${from}`);
+
+                // Handle auto-reply in background (don't block message processing)
+                AutoReplyService.handleIncomingMessage(
+                  sock,
+                  from,
+                  text,
+                  sessionId
+                ).catch((autoReplyError) => {
+                  logger.error(
+                    `❌ Auto-reply error (non-blocking):`,
+                    autoReplyError
+                  );
+                });
+              } catch (autoReplyError) {
+                logger.error(
+                  `❌ Error loading auto-reply service:`,
+                  autoReplyError
+                );
+              }
+            }
           } catch (dbError) {
             logger.error(`❌ Error saving chat message to database:`, {
               error: dbError.message,
@@ -864,13 +772,10 @@ async function handleMessagesUpsert(msgUpdate, sessionId) {
     });
   }
 }
-
 async function handleConnectionUpdate(update, sessionId, sock, userId, io) {
   try {
     const { connection, lastDisconnect, qr } = update;
-
     logger.info(`🔄 Connection update for session ${sessionId}: ${connection}`);
-
     if (qr) {
       try {
         await handleQR(qr, sessionId, userId, io);
@@ -882,7 +787,6 @@ async function handleConnectionUpdate(update, sessionId, sock, userId, io) {
         throw qrError;
       }
     }
-
     if (connection === "close") {
       try {
         await handleDisconnect(lastDisconnect, sessionId, userId);
@@ -915,57 +819,47 @@ async function handleConnectionUpdate(update, sessionId, sock, userId, io) {
         stack: error.stack,
       }
     );
-    // Don't re-throw to prevent session crash
   }
 }
-
 async function handleQR(qr, sessionId, userId, io) {
   try {
     const qrData = await QRCode.toDataURL(qr);
-
-    // Ensure session exists before setting QR
     if (!sessions[sessionId]) {
       sessions[sessionId] = { sock: null, qr: null };
     }
-
     sessions[sessionId].qr = qrData;
-
     logger.info(`🔄 QR Code updated for session ${sessionId}`);
-
-    // ✨ Check existing session and preserve userId
     const sessionCheck = await checkSessionExists(sessionId, userId);
     let finalUserId = userId;
-    
     if (sessionCheck.exists) {
-      // If session exists, preserve the existing userId
       if (sessionCheck.session.userId) {
         finalUserId = sessionCheck.session.userId;
-        logger.info(`📋 Using existing userId ${finalUserId} for session ${sessionId}`);
-      }
-      // If existing userId is null and we have a new userId, use the new one
-      else if (!sessionCheck.session.userId && userId) {
+        logger.info(
+          `📋 Using existing userId ${finalUserId} for session ${sessionId}`
+        );
+      } else if (!sessionCheck.session.userId && userId) {
         finalUserId = userId;
-        logger.info(`📝 Updating session ${sessionId} with new userId: ${userId}`);
+        logger.info(
+          `📝 Updating session ${sessionId} with new userId: ${userId}`
+        );
       }
     } else {
-      // New session, use provided userId
-      logger.info(`🆕 Creating new session ${sessionId} with userId: ${userId}`);
+      logger.info(
+        `🆕 Creating new session ${sessionId} with userId: ${userId}`
+      );
     }
-
-    // Upsert with the final userId
     await SessionModel.upsert({
       sessionId,
       status: "pending",
       userId: finalUserId,
     });
-
-    logger.info(`💾 Session ${sessionId} saved to DB with userId: ${finalUserId}`);
-
+    logger.info(
+      `💾 Session ${sessionId} saved to DB with userId: ${finalUserId}`
+    );
     if (qrWaiters[sessionId]) {
       qrWaiters[sessionId].forEach((resolve) => resolve(qrData));
       delete qrWaiters[sessionId];
     }
-
     if (qrWaiters[sessionId]) {
       qrWaiters[sessionId].forEach((resolve) => resolve(qrData));
       delete qrWaiters[sessionId];
@@ -978,56 +872,48 @@ async function handleQR(qr, sessionId, userId, io) {
     throw error;
   }
 }
-
 async function handleConnected(sock, sessionId, userId, io) {
   try {
-    // Ensure session exists
     if (!sessions[sessionId]) {
       sessions[sessionId] = { sock: null, qr: null };
     }
-
     sessions[sessionId].qr = null;
-
-    // ✨ Check existing session and preserve userId
     const sessionCheck = await checkSessionExists(sessionId, userId);
     let finalUserId = userId;
-    
     if (sessionCheck.exists) {
-      // If session exists, preserve the existing userId
       if (sessionCheck.session.userId) {
         finalUserId = sessionCheck.session.userId;
-        logger.info(`📋 Using existing userId ${finalUserId} for session ${sessionId}`);
-      }
-      // If existing userId is null and we have a new userId, use the new one
-      else if (!sessionCheck.session.userId && userId) {
+        logger.info(
+          `📋 Using existing userId ${finalUserId} for session ${sessionId}`
+        );
+      } else if (!sessionCheck.session.userId && userId) {
         finalUserId = userId;
-        logger.info(`📝 Updating session ${sessionId} with new userId: ${userId}`);
+        logger.info(
+          `📝 Updating session ${sessionId} with new userId: ${userId}`
+        );
       }
     } else {
-      // New session, use provided userId
-      logger.info(`🆕 Creating new session ${sessionId} with userId: ${userId}`);
+      logger.info(
+        `🆕 Creating new session ${sessionId} with userId: ${userId}`
+      );
     }
-
-    // Validate sock.user exists
     if (!sock.user || !sock.user.id) {
       throw new Error("Socket user information is not available");
     }
-
     await SessionModel.upsert({
       sessionId,
       status: "connected",
       userId: finalUserId,
       phoneNumber: sock.user.id.split(":")[0],
     });
-
     logger.info(`🔄 Connection opened for session ${sessionId}`);
-    logger.info(`💾 Session ${sessionId} connected to DB with userId: ${finalUserId}`);
-
-    // Emit to user-specific room instead of all clients
+    logger.info(
+      `💾 Session ${sessionId} connected to DB with userId: ${finalUserId}`
+    );
     io.to(`user_${finalUserId}`).emit("qr_scanned", {
       sessionId,
       message: "QR Code Scanned",
-      userId: finalUserId
+      userId: finalUserId,
     });
   } catch (error) {
     logger.error(`❌ Error in handleConnected for session ${sessionId}:`, {
@@ -1039,14 +925,12 @@ async function handleConnected(sock, sessionId, userId, io) {
     throw error;
   }
 }
-
 async function handleDisconnect(lastDisconnect, sessionId, userId) {
   const statusCode = lastDisconnect?.error?.output?.statusCode;
   const statusDescription = getStatusCodeDescription(statusCode);
   logger.info(
     `🔄 Connection closed for session ${sessionId}, reason: ${statusDescription}`
   );
-
   const AUTO_RECONNECT_REASONS = [
     DisconnectReason.connectionClosed,
     DisconnectReason.connectionLost,
@@ -1054,7 +938,6 @@ async function handleDisconnect(lastDisconnect, sessionId, userId) {
     DisconnectReason.timedOut,
     DisconnectReason.restartRequired,
   ];
-
   const DO_NOT_RECONNECT_REASONS = [
     DisconnectReason.loggedOut,
     DisconnectReason.badSession,
@@ -1062,7 +945,6 @@ async function handleDisconnect(lastDisconnect, sessionId, userId) {
     DisconnectReason.forbidden,
     DisconnectReason.unavailableService,
   ];
-
   if (AUTO_RECONNECT_REASONS.includes(statusCode)) {
     logger.info(`🔄 Attempting to reconnect session ${sessionId}`);
     try {
@@ -1071,9 +953,10 @@ async function handleDisconnect(lastDisconnect, sessionId, userId) {
       logger.error(`❌ Failed to reconnect session ${sessionId}:`, err);
     }
   } else if (DO_NOT_RECONNECT_REASONS.includes(statusCode)) {
-    // Special handling for banned/forbidden sessions
     if (statusCode === DisconnectReason.forbidden) {
-      logger.error(`🚫 Session ${sessionId} has been banned/blocked by WhatsApp`);
+      logger.error(
+        `🚫 Session ${sessionId} has been banned/blocked by WhatsApp`
+      );
       await handleBannedSession(sessionId, userId);
     } else {
       logger.info(`❌ Session ${sessionId} requires logout/cleanup`);
@@ -1090,12 +973,10 @@ async function handleDisconnect(lastDisconnect, sessionId, userId) {
     }
   }
 }
-
 function cleanupSession(sessionId, userId = null) {
   try {
     const sessionDir = path.resolve(`./sessions/${sessionId}`);
     if (fs.existsSync(sessionDir)) {
-      // Try to delete individual files first, then the directory
       try {
         const files = fs.readdirSync(sessionDir);
         for (const file of files) {
@@ -1108,12 +989,9 @@ function cleanupSession(sessionId, userId = null) {
             );
           }
         }
-
-        // Try to remove the directory
         fs.rmdirSync(sessionDir);
         logger.info(`🗑️ Session folder ${sessionId} deleted`);
       } catch (dirErr) {
-        // If directory deletion fails, try with force option
         try {
           fs.rmSync(sessionDir, { recursive: true, force: true });
           logger.info(`🗑️ Session folder ${sessionId} force deleted`);
@@ -1121,10 +999,8 @@ function cleanupSession(sessionId, userId = null) {
           logger.error(
             `❌ Failed to force delete session folder ${sessionId}: ${forceErr.message}`
           );
-          // Continue execution even if deletion fails
         }
       }
-
       deleteSessionFromDB(sessionId, userId).catch((err) => {
         logger.error(`❌ Error deleting session from DB:`, err);
       });
@@ -1134,7 +1010,6 @@ function cleanupSession(sessionId, userId = null) {
       `❌ Failed to delete session folder ${sessionId}:`,
       err.message
     );
-    // Log additional details for debugging
     logger.error(
       `Session folder path: ${path.resolve(`./sessions/${sessionId}`)}`
     );
@@ -1145,27 +1020,18 @@ function cleanupSession(sessionId, userId = null) {
       path: err.path,
     });
   }
-
-  // Always cleanup memory references regardless of file deletion success
   delete sessions[sessionId];
   delete qrWaiters[sessionId];
 }
-
 async function loadExistingSessions(userId = null) {
-  // Ensure sessions directory exists
   ensureSessionsDirectory();
-
   const sessionsDir = path.resolve("./sessions");
-
   if (!fs.existsSync(sessionsDir)) return;
-
   const sessionFolders = fs.readdirSync(sessionsDir);
-
   for (const sessionId of sessionFolders) {
     try {
       const sessionPath = path.join(sessionsDir, sessionId);
       const stat = fs.statSync(sessionPath);
-
       if (stat.isDirectory()) {
         logger.info(`🔄 Memuat ulang session: ${sessionId}`);
         await startWhatsApp(sessionId, userId);
@@ -1175,31 +1041,24 @@ async function loadExistingSessions(userId = null) {
     }
   }
 }
-
 async function deleteSessionFromDB(sessionId, userId = null) {
   try {
     const updateData = { sessionId, status: "logout" };
-
-    // Only include userId in the update if it's not null
     if (userId !== null) {
       updateData.userId = userId;
     }
-
     await SessionModel.upsert(updateData);
     logger.info(`💾 Session ${sessionId} logged out from DB`);
   } catch (err) {
     logger.error(`❌ Failed to logout DB session ${sessionId}:`, err.message);
   }
 }
-
 function getSock(sessionId) {
   return sessions[sessionId]?.sock;
 }
-
 function getQRCodeData(sessionId) {
   return sessions[sessionId]?.qr;
 }
-
 function waitForQRCode(sessionId) {
   return new Promise((resolve) => {
     const existing = getQRCodeData(sessionId);
@@ -1211,50 +1070,38 @@ function waitForQRCode(sessionId) {
     }
   });
 }
-
 function getActiveSessionIds() {
   return Object.keys(sessions);
 }
-
-// Function to refresh contact names for a session
 async function refreshContactNames(sessionId) {
   try {
     const sock = sessions[sessionId]?.sock;
     if (!sock) {
       throw new Error(`Session ${sessionId} not found`);
     }
-
     logger.info(`🔄 Refreshing contact names for session ${sessionId}...`);
-
-    // Clear cache for this session
     const sessionPrefix = `${sock.user?.id || "unknown"}_`;
     for (const [key] of contactNameCache) {
       if (key.startsWith(sessionPrefix)) {
         contactNameCache.delete(key);
       }
     }
-
-    // Get all unique contacts from database
     const uniqueContacts = await ChatMessageModel.findAll({
       attributes: ["from"],
       where: { sessionId },
       group: ["from"],
       raw: true,
     });
-
     let updatedCount = 0;
     for (const contact of uniqueContacts) {
       const jid = contact.from;
       if (jid.endsWith("@s.whatsapp.net")) {
         try {
           const contactName = await getContactName(sock, jid);
-
-          // Update database records
           await ChatMessageModel.update(
             { contactName },
             { where: { sessionId, from: jid } }
           );
-
           updatedCount++;
           logger.info(`✅ Updated contact: ${contactName} (${jid})`);
         } catch (error) {
@@ -1262,7 +1109,6 @@ async function refreshContactNames(sessionId) {
         }
       }
     }
-
     logger.info(
       `🎉 Contact refresh completed: ${updatedCount} contacts updated`
     );
@@ -1272,98 +1118,84 @@ async function refreshContactNames(sessionId) {
     return { success: false, error: error.message };
   }
 }
-
-// Function to get contact name for external use
 async function getContactNameForSession(sessionId, jid) {
   try {
     const sock = sessions[sessionId]?.sock;
     if (!sock) {
       throw new Error(`Session ${sessionId} not found`);
     }
-
     return await getContactNameWithCache(sock, jid);
   } catch (error) {
     logger.error(`❌ Error getting contact name:`, error);
-    return jid.split("@")[0]; // Fallback to phone number
+    return jid.split("@")[0];
   }
 }
-
-// New function to handle banned/blocked sessions
 async function handleBannedSession(sessionId, userId) {
   try {
     logger.error(`🚫 Handling banned session: ${sessionId}`);
-
-    // Update database status to BANNED
     await SessionModel.upsert({
       sessionId,
       status: "BANNED",
       userId: userId,
       errorMessage: "Session has been banned/blocked by WhatsApp",
       errorCode: "SESSION_BANNED",
-      bannedAt: new Date()
+      bannedAt: new Date(),
     });
-
-    // Stop any running blast operations for this session
     const BlastExecutionService = require("../services/blastExecutionService");
     try {
-      // Check if there are any running executions for this session
-      const executionState = BlastExecutionService.runningExecutions?.get(sessionId);
+      const executionState =
+        BlastExecutionService.runningExecutions?.get(sessionId);
       if (executionState) {
-        logger.info(`🛑 Stopping blast execution for banned session: ${sessionId}`);
+        logger.info(
+          `🛑 Stopping blast execution for banned session: ${sessionId}`
+        );
         executionState.isStopped = true;
-        executionState.stopReason = 'session_banned';
-
-        // Update blast session status
+        executionState.stopReason = "session_banned";
         const BlastSession = require("../models/blastSessionModel");
         await BlastSession.update(
           {
-            status: 'ERROR',
-            errorMessage: 'Session banned during execution',
-            errorCode: 'SESSION_BANNED',
-            stoppedAt: new Date()
+            status: "ERROR",
+            errorMessage: "Session banned during execution",
+            errorCode: "SESSION_BANNED",
+            stoppedAt: new Date(),
           },
           { where: { sessionId } }
         );
-
-        // Clean up execution state
         if (executionState.updateInterval) {
           clearInterval(executionState.updateInterval);
         }
         delete BlastExecutionService.runningExecutions[sessionId];
       }
     } catch (blastError) {
-      logger.error(`❌ Error stopping blast execution for banned session:`, blastError);
+      logger.error(
+        `❌ Error stopping blast execution for banned session:`,
+        blastError
+      );
     }
-
-    // Emit notification to user
     const io = getSocket();
     if (io && userId) {
       io.to(`user_${userId}`).emit("session_banned", {
         sessionId,
         message: "Your WhatsApp session has been banned/blocked",
         reason: "Session banned by WhatsApp",
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       });
-
       logger.info(`📡 Emitted session_banned notification to user ${userId}`);
     }
-
-    // Cleanup session files and memory
     cleanupSession(sessionId, userId);
-
     logger.info(`✅ Banned session ${sessionId} handled and cleaned up`);
-
   } catch (error) {
     logger.error(`❌ Error handling banned session ${sessionId}:`, error);
-    // Still attempt cleanup even if error occurs
     try {
       cleanupSession(sessionId, userId);
     } catch (cleanupError) {
-      logger.error(`❌ Failed to cleanup banned session ${sessionId}:`, cleanupError);
+      logger.error(
+        `❌ Failed to cleanup banned session ${sessionId}:`,
+        cleanupError
+      );
     }
   }
 }
-
 module.exports = {
   startWhatsApp,
   getSock,
