@@ -1,7 +1,5 @@
-// /api/models/menuItem.model.js
 const { DataTypes } = require("sequelize");
 const sequelize = require("./db");
-
 const MenuItem = sequelize.define(
   "MenuItem",
   {
@@ -36,5 +34,4 @@ const MenuItem = sequelize.define(
     tableName: "menu_items",
   }
 );
-
 module.exports = MenuItem;

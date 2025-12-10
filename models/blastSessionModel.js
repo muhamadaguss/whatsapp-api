@@ -1,6 +1,5 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("./db");
-
 const BlastSession = sequelize.define(
   "BlastSession",
   {
@@ -123,37 +122,26 @@ const BlastSession = sequelize.define(
     underscored: true,
   }
 );
-
-// Associations will be defined after all models are loaded
-
-// Instance methods
 BlastSession.prototype.updateProgress = function () {
   const completed = this.sentCount + this.failedCount + this.skippedCount;
   this.progressPercentage =
     this.totalMessages > 0
       ? ((completed / this.totalMessages) * 100).toFixed(2)
       : 0;
-
   return this.save();
 };
-
 BlastSession.prototype.isActive = function () {
   return ["RUNNING", "PAUSED"].includes(this.status);
 };
-
 BlastSession.prototype.canResume = function () {
   return this.status === "PAUSED";
 };
-
 BlastSession.prototype.canPause = function () {
   return this.status === "RUNNING";
 };
-
 BlastSession.prototype.canStop = function () {
   return ["RUNNING", "PAUSED"].includes(this.status);
 };
-
-// Static methods
 BlastSession.findActiveByUser = function (userId) {
   return this.findAll({
     where: {
@@ -163,14 +151,11 @@ BlastSession.findActiveByUser = function (userId) {
     order: [["createdAt", "DESC"]],
   });
 };
-
 BlastSession.findBySessionId = function (sessionId) {
   return this.findOne({
     where: { sessionId },
   });
 };
-
-// Association with Session model (WhatsApp sessions)
 BlastSession.associate = function(models) {
   BlastSession.belongsTo(models.Session, {
     foreignKey: 'whatsappSessionId',
@@ -178,5 +163,4 @@ BlastSession.associate = function(models) {
     as: 'whatsappSession'
   });
 };
-
 module.exports = BlastSession;

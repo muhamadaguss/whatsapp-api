@@ -2,25 +2,15 @@ const logger = require("../utils/logger");
 const { getSocket } = require("../auth/socket");
 const BlastSession = require("../models/blastSessionModel");
 const BlastMessage = require("../models/blastMessageModel");
-
-// Singleton instance
 let instance = null;
-
-/**
- * Real-time Blast Updates Service
- * Handles all socket.io emissions for blast control dashboard
- */
 class BlastRealTimeService {
   constructor() {
     if (instance) {
       return instance;
     }
-    
     this.socket = null;
-    // Don't initialize socket in constructor to avoid errors on startup
     instance = this;
   }
-
   init() {
     try {
       this.socket = getSocket();
@@ -34,10 +24,6 @@ class BlastRealTimeService {
       this.socket = null;
     }
   }
-
-  /**
-   * Get current socket instance with lazy initialization
-   */
   getSocket() {
     if (!this.socket) {
       try {
@@ -49,28 +35,14 @@ class BlastRealTimeService {
     }
     return this.socket;
   }
-
-  /**
-   * Calculate accurate progress percentage based on total messages processed
-   * @param {Object} session - Blast session object
-   * @returns {number} Progress percentage (0-100)
-   */
   calculateProgressPercentage(session) {
     if (!session || !session.totalMessages || session.totalMessages === 0) {
       return 0;
     }
-
     const processedCount = (session.sentCount || 0) + (session.failedCount || 0) + (session.skippedCount || 0);
     const percentage = (processedCount / session.totalMessages) * 100;
-    
-    return Math.min(Math.round(percentage * 100) / 100, 100); // Round to 2 decimal places, max 100%
+    return Math.min(Math.round(percentage * 100) / 100, 100); 
   }
-
-  /**
-   * Emit session progress update to specific user
-   * @param {string} sessionId - Session ID
-   * @param {Object} progressData - Progress data object
-   */
   async emitSessionProgress(sessionId, progressData = {}) {
     try {
       const socket = this.getSocket();
@@ -78,7 +50,6 @@ class BlastRealTimeService {
         logger.warn("⚠️ Socket not available for session progress emission");
         return;
       }
-
       const session = await BlastSession.findOne({
         where: { sessionId },
         include: [
@@ -89,16 +60,11 @@ class BlastRealTimeService {
           }
         ]
       });
-
       if (!session) {
         logger.warn(`⚠️ Session ${sessionId} not found for progress emission`);
         return;
       }
-
-      // Calculate accurate progress percentage
       const progressPercentage = this.calculateProgressPercentage(session);
-
-      // Prepare comprehensive progress data
       const progressInfo = {
         sessionId: session.sessionId,
         userId: session.userId,
@@ -122,27 +88,15 @@ class BlastRealTimeService {
         timestamp: new Date().toISOString(),
         ...progressData
       };
-
-      // Emit to specific user
       socket.to(`user_${session.userId}`).emit("blast-progress-update", progressInfo);
-      
-      // Also emit to admin room if needed
       socket.to("admin").emit("blast-progress-update", progressInfo);
-
       logger.debug(`📡 Emitted progress update for session ${sessionId}: ${progressPercentage}% (${progressInfo.processedCount}/${session.totalMessages})`);
-
       return progressInfo;
     } catch (error) {
       logger.error(`❌ Failed to emit session progress for ${sessionId}:`, error);
       throw error;
     }
   }
-
-  /**
-   * Emit failed message details with enhanced error information
-   * @param {string} sessionId - Session ID
-   * @param {Object} failureData - Failure data object
-   */
   async emitFailedMessage(sessionId, failureData) {
     try {
       const socket = this.getSocket();
@@ -150,17 +104,14 @@ class BlastRealTimeService {
         logger.warn("⚠️ Socket not available for failed message emission");
         return;
       }
-
       const session = await BlastSession.findOne({
         where: { sessionId },
         attributes: ["userId", "sessionId", "campaignName"]
       });
-
       if (!session) {
         logger.warn(`⚠️ Session ${sessionId} not found for failed message emission`);
         return;
       }
-
       const failedMessageInfo = {
         sessionId,
         userId: session.userId,
@@ -177,32 +128,18 @@ class BlastRealTimeService {
         timestamp: new Date().toISOString(),
         failedAt: failureData.failedAt || new Date().toISOString()
       };
-
-      // Emit to specific user
       socket.to(`user_${session.userId}`).emit("blast-message-failed", failedMessageInfo);
-      
-      // Also emit to admin room
       socket.to("admin").emit("blast-message-failed", failedMessageInfo);
-
       logger.debug(`❌ Emitted failed message for session ${sessionId}: ${failureData.phoneNumber} - ${failureData.errorType}`);
-
-      // Also update overall progress
       await this.emitSessionProgress(sessionId, {
         lastFailedMessage: failedMessageInfo
       });
-
       return failedMessageInfo;
     } catch (error) {
       logger.error(`❌ Failed to emit failed message for ${sessionId}:`, error);
       throw error;
     }
   }
-
-  /**
-   * Emit successful message delivery
-   * @param {string} sessionId - Session ID
-   * @param {Object} successData - Success data object
-   */
   async emitSuccessMessage(sessionId, successData) {
     try {
       const socket = this.getSocket();
@@ -210,17 +147,14 @@ class BlastRealTimeService {
         logger.warn("⚠️ Socket not available for success message emission");
         return;
       }
-
       const session = await BlastSession.findOne({
         where: { sessionId },
         attributes: ["userId", "sessionId", "campaignName"]
       });
-
       if (!session) {
         logger.warn(`⚠️ Session ${sessionId} not found for success message emission`);
         return;
       }
-
       const successMessageInfo = {
         sessionId,
         userId: session.userId,
@@ -232,30 +166,17 @@ class BlastRealTimeService {
         sentAt: successData.sentAt || new Date().toISOString(),
         timestamp: new Date().toISOString()
       };
-
-      // Emit to specific user
       socket.to(`user_${session.userId}`).emit("blast-message-success", successMessageInfo);
-
       logger.debug(`✅ Emitted success message for session ${sessionId}: ${successData.phoneNumber}`);
-
-      // Also update overall progress
       await this.emitSessionProgress(sessionId, {
         lastSuccessMessage: successMessageInfo
       });
-
       return successMessageInfo;
     } catch (error) {
       logger.error(`❌ Failed to emit success message for ${sessionId}:`, error);
       throw error;
     }
   }
-
-  /**
-   * Emit blast session status change
-   * @param {string} sessionId - Session ID
-   * @param {string} newStatus - New status
-   * @param {Object} additionalData - Additional data
-   */
   async emitSessionStatusChange(sessionId, newStatus, additionalData = {}) {
     try {
       const socket = this.getSocket();
@@ -263,7 +184,6 @@ class BlastRealTimeService {
         logger.warn("⚠️ Socket not available for status change emission");
         return;
       }
-
       const session = await BlastSession.findOne({
         where: { sessionId },
         include: [
@@ -274,12 +194,10 @@ class BlastRealTimeService {
           }
         ]
       });
-
       if (!session) {
         logger.warn(`⚠️ Session ${sessionId} not found for status change emission`);
         return;
       }
-
       const statusInfo = {
         sessionId,
         userId: session.userId,
@@ -299,26 +217,15 @@ class BlastRealTimeService {
         timestamp: new Date().toISOString(),
         ...additionalData
       };
-
-      // Emit to specific user
       socket.to(`user_${session.userId}`).emit("blast-status-change", statusInfo);
-      
-      // Also emit to admin room
       socket.to("admin").emit("blast-status-change", statusInfo);
-
       logger.info(`📡 Emitted status change for session ${sessionId}: ${session.status} → ${newStatus}`);
-
       return statusInfo;
     } catch (error) {
       logger.error(`❌ Failed to emit status change for ${sessionId}:`, error);
       throw error;
     }
   }
-
-  /**
-   * Emit bulk sessions update to user
-   * @param {number} userId - User ID
-   */
   async emitSessionsUpdate(userId = null) {
     try {
       const socket = this.getSocket();
@@ -326,9 +233,7 @@ class BlastRealTimeService {
         logger.warn("⚠️ Socket not available for sessions update emission");
         return;
       }
-
       if (userId) {
-        // Emit to specific user
         const userSessions = await BlastSession.findAll({
           where: { userId },
           include: [
@@ -339,10 +244,8 @@ class BlastRealTimeService {
             }
           ],
           order: [["createdAt", "DESC"]],
-          limit: 50 // Limit for performance
+          limit: 50 
         });
-
-        // Calculate progress for each session and transform whatsappSession to whatsappAccount
         const sessionsWithProgress = await Promise.all(userSessions.map(async (session) => {
           const sessionData = {
             ...session.toJSON(),
@@ -350,8 +253,6 @@ class BlastRealTimeService {
             processedCount: session.sentCount + session.failedCount + session.skippedCount,
             remainingCount: session.totalMessages - (session.sentCount + session.failedCount + session.skippedCount)
           };
-
-          // Transform whatsappSession to whatsappAccount (same as controller logic)
           if (sessionData.whatsappSession) {
             sessionData.whatsappAccount = {
               sessionId: sessionData.whatsappSession.sessionId,
@@ -364,7 +265,6 @@ class BlastRealTimeService {
               operatorInfo: sessionData.whatsappSession.metadata?.operatorInfo || null
             };
           } else {
-            // Fallback untuk missing WhatsApp session data
             sessionData.whatsappAccount = {
               sessionId: sessionData.whatsappSessionId,
               phoneNumber: null,
@@ -376,8 +276,6 @@ class BlastRealTimeService {
               operatorInfo: null
             };
           }
-
-          // ⏱️ Get next message timing info for RUNNING sessions
           if (sessionData.status === 'RUNNING') {
             try {
               const blastExecutionService = require('./blastExecutionService');
@@ -391,29 +289,21 @@ class BlastRealTimeService {
           } else {
             sessionData.nextMessageInfo = null;
           }
-
-          // Remove the nested whatsappSession object
           delete sessionData.whatsappSession;
-          
           return sessionData;
         }));
-
         socket.to(`user_${userId}`).emit("sessions-update", sessionsWithProgress);
         logger.debug(`📡 Emitted sessions update to user ${userId}: ${sessionsWithProgress.length} sessions`);
-
         return sessionsWithProgress;
       } else {
-        // Emit to all users
         const allUsers = await BlastSession.findAll({
           attributes: ["userId"],
           group: ["userId"],
           raw: true
         });
-
         for (const userObj of allUsers) {
           await this.emitSessionsUpdate(userObj.userId);
         }
-
         logger.debug(`📡 Emitted sessions update to all users: ${allUsers.length} users`);
       }
     } catch (error) {
@@ -421,15 +311,6 @@ class BlastRealTimeService {
       throw error;
     }
   }
-
-  /**
-   * Emit toast notification
-   * @param {string} type - Toast type: 'success', 'error', 'warning', 'info'
-   * @param {string} title - Toast title
-   * @param {string} description - Toast description
-   * @param {number} userId - User ID (optional)
-   * @param {string} sessionId - Session ID (optional)
-   */
   emitToastNotification(type, title, description, userId = null, sessionId = null) {
     try {
       const socket = this.getSocket();
@@ -437,7 +318,6 @@ class BlastRealTimeService {
         logger.warn("⚠️ Socket not available for toast notification");
         return;
       }
-
       const toastData = {
         type,
         title,
@@ -446,13 +326,11 @@ class BlastRealTimeService {
         timestamp: new Date().toISOString(),
         id: `toast_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
       };
-
       if (userId) {
         socket.to(`user_${userId}`).emit("toast-notification", toastData);
       } else {
         socket.emit("toast-notification", toastData);
       }
-
       logger.debug(`🍞 Emitted toast notification: ${type} - ${title}`);
       return toastData;
     } catch (error) {
@@ -460,12 +338,6 @@ class BlastRealTimeService {
       throw error;
     }
   }
-
-  /**
-   * Emit campaign completion
-   * @param {string} sessionId - Session ID
-   * @param {Object} completionData - Completion data
-   */
   async emitCampaignCompletion(sessionId, completionData = {}) {
     try {
       const session = await BlastSession.findOne({
@@ -478,12 +350,10 @@ class BlastRealTimeService {
           }
         ]
       });
-
       if (!session) {
         logger.warn(`⚠️ Session ${sessionId} not found for completion emission`);
         return;
       }
-
       const completionInfo = {
         sessionId,
         userId: session.userId,
@@ -509,18 +379,12 @@ class BlastRealTimeService {
         timestamp: new Date().toISOString(),
         ...completionData
       };
-
-      // Emit completion notification
       await this.emitSessionStatusChange(sessionId, "COMPLETED", completionInfo);
-
-      // Emit specific completion event
       const socket = this.getSocket();
       if (socket) {
         socket.to(`user_${session.userId}`).emit("campaign-completed", completionInfo);
         socket.to("admin").emit("campaign-completed", completionInfo);
       }
-
-      // Emit success toast
       this.emitToastNotification(
         "success",
         "Campaign Completed",
@@ -528,9 +392,7 @@ class BlastRealTimeService {
         session.userId,
         sessionId
       );
-
       logger.info(`🎉 Campaign ${sessionId} completed: ${session.sentCount}/${session.totalMessages} sent`);
-
       return completionInfo;
     } catch (error) {
       logger.error(`❌ Failed to emit campaign completion for ${sessionId}:`, error);
@@ -538,6 +400,4 @@ class BlastRealTimeService {
     }
   }
 }
-
-// Export class instead of instance to avoid initialization issues
 module.exports = BlastRealTimeService;

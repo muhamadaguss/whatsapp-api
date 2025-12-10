@@ -1,8 +1,6 @@
-// /api/models/blast.model.js
 const { DataTypes } = require("sequelize");
 const sequelize = require("./db");
 const User = require("./userModel");
-
 const Blast = sequelize.define(
   "Blast",
   {
@@ -21,16 +19,23 @@ const Blast = sequelize.define(
     sentCount: { type: DataTypes.INTEGER, defaultValue: 0 },
     failedCount: { type: DataTypes.INTEGER, defaultValue: 0 },
     status: { type: DataTypes.STRING, defaultValue: "processing" },
+    autoReplyEnabled: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+      field: "auto_reply_enabled",
+    },
+    autoReplyRules: {
+      type: DataTypes.ARRAY(DataTypes.UUID),
+      defaultValue: [],
+      field: "auto_reply_rules",
+    },
   },
   {
     timestamps: true,
     tableName: "blasts",
   }
 );
-
-// Association function for relationships
-Blast.associate = function(models) {
+Blast.associate = function (models) {
   Blast.belongsTo(models.User, { foreignKey: "userId", as: "user" });
 };
-
 module.exports = Blast;

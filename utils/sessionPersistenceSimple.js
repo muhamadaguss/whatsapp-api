@@ -1,25 +1,13 @@
 const logger = require("./logger");
-
-/**
- * SessionPersistence - Simple version for Phase 1 testing
- * Handles session persistence and recovery (without database)
- */
 class SessionPersistence {
   constructor() {
     this.recoveryInProgress = false;
   }
-
-  /**
-   * Format duration in human readable format
-   * @param {number} durationMs - Duration in milliseconds
-   * @returns {string} - Formatted duration
-   */
   formatDuration(durationMs) {
     const seconds = Math.floor(durationMs / 1000);
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
     const days = Math.floor(hours / 24);
-
     if (days > 0) {
       return `${days}d ${hours % 24}h ${minutes % 60}m`;
     } else if (hours > 0) {
@@ -30,32 +18,16 @@ class SessionPersistence {
       return `${seconds}s`;
     }
   }
-
-  /**
-   * Calculate session duration
-   * @param {Object} session - Session object
-   * @returns {Object} - Duration information
-   */
   calculateSessionDuration(session) {
     const startTime = session.startedAt;
     const endTime = session.completedAt || session.stoppedAt || new Date();
-
     if (!startTime) {
       return { duration: null, durationMs: null };
     }
-
     const durationMs = new Date(endTime) - new Date(startTime);
     const duration = this.formatDuration(durationMs);
-
     return { duration, durationMs };
   }
-
-  /**
-   * Save session state to database (mock)
-   * @param {string} sessionId - Session ID
-   * @param {Object} state - Session state to save
-   * @returns {boolean} - Success status
-   */
   async saveSessionState(sessionId, state) {
     try {
       logger.debug(`💾 Session state saved for ${sessionId}: ${state.status}`);
@@ -65,15 +37,8 @@ class SessionPersistence {
       return false;
     }
   }
-
-  /**
-   * Load session state from database (mock)
-   * @param {string} sessionId - Session ID
-   * @returns {Object|null} - Session state or null if not found
-   */
   async loadSessionState(sessionId) {
     try {
-      // Mock session state
       return {
         sessionId,
         userId: 1,
@@ -105,6 +70,4 @@ class SessionPersistence {
     }
   }
 }
-
-// Export singleton instance
 module.exports = new SessionPersistence();

@@ -1,6 +1,5 @@
 const { DataTypes, Op } = require("sequelize");
 const sequelize = require("./db");
-
 const BlastMessage = sequelize.define(
   "BlastMessage",
   {
@@ -101,27 +100,20 @@ const BlastMessage = sequelize.define(
     underscored: true,
   }
 );
-
-// Associations will be defined after all models are loaded
-
-// Instance methods
 BlastMessage.prototype.canRetry = function () {
   return this.status === "failed" && this.retryCount < this.maxRetries;
 };
-
 BlastMessage.prototype.markAsProcessing = function () {
   this.status = "processing";
   this.processingStartedAt = new Date();
   return this.save();
 };
-
 BlastMessage.prototype.markAsSent = function (whatsappMessageId) {
   this.status = "sent";
   this.whatsappMessageId = whatsappMessageId;
   this.sentAt = new Date();
   return this.save();
 };
-
 BlastMessage.prototype.markAsFailed = function (errorMessage) {
   this.status = "failed";
   this.errorMessage = errorMessage;
@@ -129,14 +121,11 @@ BlastMessage.prototype.markAsFailed = function (errorMessage) {
   this.retryCount += 1;
   return this.save();
 };
-
 BlastMessage.prototype.markAsSkipped = function (reason) {
   this.status = "skipped";
   this.errorMessage = reason;
   return this.save();
 };
-
-// Static methods
 BlastMessage.findPendingBySession = function (sessionId, limit = null) {
   const options = {
     where: {
@@ -145,14 +134,11 @@ BlastMessage.findPendingBySession = function (sessionId, limit = null) {
     },
     order: [["messageIndex", "ASC"]],
   };
-
   if (limit) {
     options.limit = limit;
   }
-
   return this.findAll(options);
 };
-
 BlastMessage.findRetryableBySession = function (sessionId, limit = null) {
   const options = {
     where: {
@@ -164,14 +150,11 @@ BlastMessage.findRetryableBySession = function (sessionId, limit = null) {
     },
     order: [["messageIndex", "ASC"]],
   };
-
   if (limit) {
     options.limit = limit;
   }
-
   return this.findAll(options);
 };
-
 BlastMessage.getSessionStats = function (sessionId) {
   return this.findAll({
     where: { sessionId },
@@ -180,7 +163,6 @@ BlastMessage.getSessionStats = function (sessionId) {
     raw: true,
   });
 };
-
 BlastMessage.findNextToProcess = function (sessionId, currentIndex) {
   return this.findOne({
     where: {
@@ -193,5 +175,4 @@ BlastMessage.findNextToProcess = function (sessionId, currentIndex) {
     order: [["messageIndex", "ASC"]],
   });
 };
-
 module.exports = BlastMessage;

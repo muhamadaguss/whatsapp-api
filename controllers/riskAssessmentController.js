@@ -1,30 +1,10 @@
-/**
- * Risk Assessment Controller
- * 
- * Handles API endpoints for real-time risk assessment
- * 
- * Endpoints:
- * - GET /api/blast/:sessionId/risk-assessment
- * - POST /api/blast/:sessionId/auto-action
- * - GET /api/blast/:sessionId/risk-history
- * 
- * @module riskAssessmentController
- */
-
 const riskAssessmentService = require("../services/riskAssessmentService");
 const BlastSession = require("../models/blastSessionModel");
 const logger = require("../utils/logger");
-
-/**
- * GET /api/blast/:sessionId/risk-assessment
- * Get current risk assessment for a blast session
- */
 exports.getRiskAssessment = async (req, res) => {
   try {
     const { sessionId } = req.params;
     const { useCache = 'true' } = req.query;
-
-    // Check if session exists
     const session = await BlastSession.findById(sessionId);
     if (!session) {
       return res.status(404).json({
@@ -32,13 +12,11 @@ exports.getRiskAssessment = async (req, res) => {
         error: "Session not found",
       });
     }
-
-    // Try to use cached assessment if requested and recent (< 10 seconds old)
     if (useCache === 'true') {
       const cached = riskAssessmentService.getCachedAssessment(sessionId);
       if (cached) {
         const age = Date.now() - new Date(cached.timestamp).getTime();
-        if (age < 10000) { // Less than 10 seconds old
+        if (age < 10000) { 
           return res.json({
             success: true,
             data: cached,
@@ -48,16 +26,12 @@ exports.getRiskAssessment = async (req, res) => {
         }
       }
     }
-
-    // Calculate fresh assessment
     const assessment = await riskAssessmentService.calculateRiskAssessment(sessionId);
-
     res.json({
       success: true,
       data: assessment,
       cached: false,
     });
-
   } catch (error) {
     logger.error("Error getting risk assessment:", error);
     res.status(500).json({
@@ -66,17 +40,10 @@ exports.getRiskAssessment = async (req, res) => {
     });
   }
 };
-
-/**
- * POST /api/blast/:sessionId/auto-action
- * Execute automatic action based on risk assessment
- */
 exports.executeAutoAction = async (req, res) => {
   try {
     const { sessionId } = req.params;
     const { action, reason, force = false } = req.body;
-
-    // Validate action
     const validActions = ['pause', 'stop', 'slow_down', 'resume'];
     if (!validActions.includes(action)) {
       return res.status(400).json({
@@ -84,8 +51,6 @@ exports.executeAutoAction = async (req, res) => {
         error: `Invalid action. Must be one of: ${validActions.join(', ')}`,
       });
     }
-
-    // Check if session exists
     const session = await BlastSession.findById(sessionId);
     if (!session) {
       return res.status(404).json({
@@ -93,11 +58,7 @@ exports.executeAutoAction = async (req, res) => {
         error: "Session not found",
       });
     }
-
-    // Get current risk assessment
     const assessment = await riskAssessmentService.calculateRiskAssessment(sessionId);
-
-    // Check if action is recommended (unless forced)
     if (!force && assessment.autoAction.action !== action && action !== 'resume') {
       return res.status(400).json({
         success: false,
@@ -105,8 +66,6 @@ exports.executeAutoAction = async (req, res) => {
         recommendation: assessment.autoAction,
       });
     }
-
-    // Execute the action
     let result;
     switch (action) {
       case 'pause':
@@ -116,7 +75,6 @@ exports.executeAutoAction = async (req, res) => {
         await session.save();
         result = { message: 'Session paused successfully' };
         break;
-
       case 'stop':
         session.status = 'stopped';
         session.stoppedAt = new Date();
@@ -124,9 +82,7 @@ exports.executeAutoAction = async (req, res) => {
         await session.save();
         result = { message: 'Session stopped successfully' };
         break;
-
       case 'slow_down':
-        // Increase delays by 50%
         const currentConfig = session.config || {};
         const newConfig = {
           ...currentConfig,
@@ -143,7 +99,6 @@ exports.executeAutoAction = async (req, res) => {
           },
         };
         break;
-
       case 'resume':
         if (session.status !== 'paused') {
           return res.status(400).json({
@@ -157,10 +112,7 @@ exports.executeAutoAction = async (req, res) => {
         result = { message: 'Session resumed successfully' };
         break;
     }
-
-    // Log the auto-action
     riskAssessmentService.logAutoAction(sessionId, action, reason || 'Manual trigger');
-
     res.json({
       success: true,
       action,
@@ -169,7 +121,6 @@ exports.executeAutoAction = async (req, res) => {
       riskLevel: assessment.riskLevel,
       riskScore: assessment.riskScore,
     });
-
   } catch (error) {
     logger.error("Error executing auto-action:", error);
     res.status(500).json({
@@ -178,17 +129,10 @@ exports.executeAutoAction = async (req, res) => {
     });
   }
 };
-
-/**
- * GET /api/blast/:sessionId/risk-history
- * Get historical risk data for a session
- */
 exports.getRiskHistory = async (req, res) => {
   try {
     const { sessionId } = req.params;
     const { limit = 50 } = req.query;
-
-    // Check if session exists
     const session = await BlastSession.findById(sessionId);
     if (!session) {
       return res.status(404).json({
@@ -196,13 +140,8 @@ exports.getRiskHistory = async (req, res) => {
         error: "Session not found",
       });
     }
-
-    // Get risk history
     const history = riskAssessmentService.getRiskHistory(sessionId, parseInt(limit));
-
-    // Get auto-action log
     const autoActions = riskAssessmentService.getAutoActionLog(sessionId);
-
     res.json({
       success: true,
       data: {
@@ -212,7 +151,6 @@ exports.getRiskHistory = async (req, res) => {
         totalEntries: history.length,
       },
     });
-
   } catch (error) {
     logger.error("Error getting risk history:", error);
     res.status(500).json({
@@ -221,17 +159,10 @@ exports.getRiskHistory = async (req, res) => {
     });
   }
 };
-
-/**
- * GET /api/blast/:sessionId/risk-factors
- * Get detailed breakdown of current risk factors
- */
 exports.getRiskFactors = async (req, res) => {
   try {
     const { sessionId } = req.params;
-
     const assessment = await riskAssessmentService.calculateRiskAssessment(sessionId);
-
     res.json({
       success: true,
       data: {
@@ -245,7 +176,6 @@ exports.getRiskFactors = async (req, res) => {
         statistics: assessment.statistics,
       },
     });
-
   } catch (error) {
     logger.error("Error getting risk factors:", error);
     res.status(500).json({
@@ -254,27 +184,16 @@ exports.getRiskFactors = async (req, res) => {
     });
   }
 };
-
-/**
- * POST /api/blast/:sessionId/risk-assessment/refresh
- * Force refresh risk assessment (clear cache and recalculate)
- */
 exports.refreshRiskAssessment = async (req, res) => {
   try {
     const { sessionId } = req.params;
-
-    // Clear cache
     riskAssessmentService.clearCache(sessionId);
-
-    // Recalculate
     const assessment = await riskAssessmentService.calculateRiskAssessment(sessionId);
-
     res.json({
       success: true,
       data: assessment,
       message: 'Risk assessment refreshed',
     });
-
   } catch (error) {
     logger.error("Error refreshing risk assessment:", error);
     res.status(500).json({
@@ -283,17 +202,10 @@ exports.refreshRiskAssessment = async (req, res) => {
     });
   }
 };
-
-/**
- * GET /api/blast/sessions/:sessionId/recommendations
- * Get actionable recommendations based on current risk
- */
 exports.getRecommendations = async (req, res) => {
   try {
     const { sessionId } = req.params;
-
     const assessment = await riskAssessmentService.calculateRiskAssessment(sessionId);
-
     res.json({
       success: true,
       data: {
@@ -305,7 +217,6 @@ exports.getRecommendations = async (req, res) => {
         issueCount: assessment.detectedIssues.length,
       },
     });
-
   } catch (error) {
     logger.error("Error getting recommendations:", error);
     res.status(500).json({

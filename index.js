@@ -1,13 +1,10 @@
 require("dotenv").config();
-
-// Validate environment variables before starting the application
 const {
   validateWhatsAppEnv,
   validateProductionSecurity,
 } = require("./utils/validateEnv");
 const envConfig = validateWhatsAppEnv();
 validateProductionSecurity(envConfig);
-
 const cors = require("cors");
 const express = require("express");
 const http = require("http");
@@ -29,7 +26,7 @@ const cleanupRoutes = require("./routes/cleanupRoutes");
 const blastControlRoutes = require("./routes/blastControlRoutes");
 const sequelize = require("./models/db");
 const { loadExistingSessions } = require("./auth/session");
-const logger = require("./utils/logger"); // Mengimpor logger
+const logger = require("./utils/logger");
 const { initSocket } = require("./auth/socket");
 const { errorHandler, notFound } = require("./middleware/errorHandler");
 const {
@@ -47,16 +44,13 @@ const {
   validateContentType,
   validateRequestSize,
 } = require("./middleware/securityMiddleware");
-
 const app = express();
 const port = envConfig.PORT;
-
-// Initialize file cleanup manager
 const fileCleanup = new FileCleanupManager({
-  tempFileMaxAge: 24 * 60 * 60 * 1000, // 24 hours
-  logFileMaxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-  sessionFileMaxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-  cleanupInterval: 60 * 60 * 1000, // 1 hour
+  tempFileMaxAge: 24 * 60 * 60 * 1000,
+  logFileMaxAge: 7 * 24 * 60 * 60 * 1000,
+  sessionFileMaxAge: 30 * 24 * 60 * 60 * 1000,
+  cleanupInterval: 60 * 60 * 1000,
   directories: {
     uploads: "./uploads",
     logs: "./logs",
@@ -64,10 +58,8 @@ const fileCleanup = new FileCleanupManager({
     temp: "./temp",
   },
   maxFilesToDelete: 100,
-  dryRun: process.env.CLEANUP_DRY_RUN === "true", // Control via environment variable
+  dryRun: process.env.CLEANUP_DRY_RUN === "true",
 });
-
-// Enhanced CORS configuration with security validation
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(",").map((origin) => origin.trim())
   : [
@@ -77,42 +69,27 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
       "http://localhost:8081",
       "http://127.0.0.1:8081",
     ];
-
-// Generate secure CORS configuration
 const corsConfig = SecurityUtils.generateCORSConfig(allowedOrigins);
 app.use(cors(corsConfig));
-
-// Security middleware
 const helmetConfig = SecurityUtils.generateSecurityHeaders();
 app.use(helmet(helmetConfig));
-
-// Custom security middleware
 app.use(requestLogger);
 app.use(securityHeaders);
 app.use(validateOrigin(allowedOrigins));
 app.use(validateContentType);
 app.use(validateRequestSize("10mb"));
 app.use(sanitizeInput);
-
-// Removed shutdown handling middleware
-
-// Rate limiting
 app.set("trust proxy", 1);
 const rateLimitConfig = SecurityUtils.generateRateLimitConfig();
 const limiter = rateLimit(rateLimitConfig);
-app.use("/api/", limiter); // Apply to API routes only
-
-// Speed limiting (slow down repeated requests) - Compatible with express-slow-down v2
+app.use("/api/", limiter);
 const speedLimitConfig = SecurityUtils.generateSpeedLimitConfig();
 const speedLimiter = slowDown(speedLimitConfig);
 app.use(speedLimiter);
-
-// Body parser with size limits
 app.use(
   bodyParser.json({
     limit: "10mb",
     verify: (req, res, buf) => {
-      // Store raw body for webhook verification if needed
       req.rawBody = buf;
     },
   })
@@ -123,8 +100,6 @@ app.use(
     limit: "10mb",
   })
 );
-
-// Enhanced health check endpoint
 app.get("/health", async (req, res) => {
   try {
     const dbStatus = await dbHealthCheck.performCheck();
@@ -138,7 +113,6 @@ app.get("/health", async (req, res) => {
       database: dbStatus,
       pid: process.pid,
     };
-
     const statusCode = dbStatus.healthy ? 200 : 503;
     res.status(statusCode).json(healthStatus);
   } catch (error) {
@@ -149,8 +123,6 @@ app.get("/health", async (req, res) => {
     });
   }
 });
-
-// Readiness probe endpoint
 app.get("/ready", async (req, res) => {
   try {
     const dbStatus = await dbHealthCheck.performCheck();
@@ -167,10 +139,6 @@ app.get("/ready", async (req, res) => {
     res.status(503).json({ status: "NOT_READY", error: error.message });
   }
 });
-
-// Removed shutdown status endpoint
-
-// File cleanup management endpoints
 app.get("/cleanup/stats", async (req, res) => {
   try {
     const stats = await fileCleanup.getCleanupStats();
@@ -186,14 +154,12 @@ app.get("/cleanup/stats", async (req, res) => {
     });
   }
 });
-
 app.post("/cleanup/manual", async (req, res) => {
   try {
     const options = {
-      dryRun: req.body.dryRun !== false, // Default to dry run
+      dryRun: req.body.dryRun !== false,
       maxAge: req.body.maxAge ? parseInt(req.body.maxAge) : undefined,
     };
-
     const results = await fileCleanup.manualCleanup(options);
     res.status(200).json({
       status: "success",
@@ -207,12 +173,9 @@ app.post("/cleanup/manual", async (req, res) => {
     });
   }
 });
-
-// Serve static files for uploaded images and received media
 const path = require("path");
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use("/media", express.static(path.join(__dirname, "media")));
-
 app.use("/whatsapp", whatsappRoutes);
 app.use("/auth", authRoutes);
 app.use("/download", downloadRoutes);
@@ -226,51 +189,33 @@ app.use("/cleanup", cleanupRoutes);
 app.use("/classifier", require("./routes/classifierRoutes"));
 app.use("/spin-text", require("./routes/spinTextRoutes"));
 app.use("/blast-control", blastControlRoutes);
-app.use("/api/blast", require("./routes/riskAssessment")); // Risk Assessment API
-app.use("/api/whatsapp", require("./routes/accountHealth")); // Account Health API
-
-// Error handling middleware (harus di akhir setelah semua routes)
-app.use(notFound); // 404 handler
-app.use(errorHandler); // Global error handler
-
-// Inisialisasi dan jalankan socket.io
-const server = http.createServer(app); // Gunakan app di sini
+app.use("/api/blast", require("./routes/riskAssessment"));
+app.use("/api/whatsapp", require("./routes/accountHealth"));
+app.use("/auto-reply", require("./routes/autoReplyRoutes"));
+app.use(notFound);
+app.use(errorHandler);
+const server = http.createServer(app);
 const io = initSocket(server);
-
 io.on("connection", (socket) => {
-  logger.info(`✅ User connected via socket.io. ID: ${socket.id}, User: ${socket.userId}`);
-  
-  // Join user to their specific room
+  logger.info(
+    `✅ User connected via socket.io. ID: ${socket.id}, User: ${socket.userId}`
+  );
   if (socket.userId) {
     socket.join(`user_${socket.userId}`);
     logger.info(`👤 User ${socket.userId} joined room: user_${socket.userId}`);
-    
-    // Log current rooms for debugging
     const rooms = Array.from(socket.rooms);
     logger.info(`🏠 Socket ${socket.id} is in rooms:`, rooms);
   }
-  
   socket.on("disconnect", () => {
     logger.info(`❌ User disconnected: ${socket.id} (User: ${socket.userId})`);
   });
 });
-
-// Initialize database health check
 const dbHealthCheck = new DatabaseHealthCheck(sequelize);
-
-// Database initialization with proper error handling
 async function initializeDatabase() {
   try {
-    // Validate database configuration
     validateDatabaseConfig();
-
-    // Test database connection with retry logic
     await testDatabaseConnection(sequelize);
-
-    // Import all models to ensure they are registered with Sequelize
     logger.info("📋 Loading models...");
-
-    // Load existing models
     require("./models/userModel");
     require("./models/sessionModel");
     require("./models/blastModel");
@@ -279,56 +224,58 @@ async function initializeDatabase() {
     require("./models/menuModel");
     require("./models/messageStatusModel");
     require("./models/blacklistedTokenModel");
-
-    // Load new blast session models
     require("./models/blastSessionModel");
     require("./models/blastMessageModel");
-
-    // Setup model associations
+    require("./models/autoReplyRuleModel");
+    require("./models/autoReplyLogModel");
     logger.info("🔗 Setting up model associations...");
-    
-    // Get all models from sequelize
     const models = sequelize.models;
-    
-    // Setup associations for models that have associate function
-    Object.keys(models).forEach(modelName => {
+    Object.keys(models).forEach((modelName) => {
       if (models[modelName].associate) {
         models[modelName].associate(models);
         logger.info(`✅ Associations set up for ${modelName}`);
       }
     });
-
     logger.info("✅ All models and associations loaded successfully");
 
-    // Sync database models
-    await sequelize.sync({ alter: true });
+    // Sync auto-reply models separately with safe sync
+    const AutoReplyRule = require("./models/autoReplyRuleModel");
+    const AutoReplyLog = require("./models/autoReplyLogModel");
+    const { safeSync } = require("./utils/safeModelSync");
+
+    logger.info("🔄 Syncing auto-reply models...");
+    await safeSync(AutoReplyRule, { alter: false }); // Don't alter, just create if not exists
+    await safeSync(AutoReplyLog, { alter: false });
+
+    // Sync other models normally (exclude auto-reply models to avoid conflicts)
+    const modelsToSync = Object.keys(sequelize.models).filter(
+      (modelName) => !["AutoReplyRule", "AutoReplyLog"].includes(modelName)
+    );
+
+    for (const modelName of modelsToSync) {
+      await sequelize.models[modelName].sync({ alter: true });
+    }
+
     logger.info("📊 Database synced successfully");
 
-    // Start periodic health checks
-    dbHealthCheck.startPeriodicCheck();
+    // Seed default auto-reply rules if not exists
+    const { seedDefaultRules } = require("./seeders/seedAutoReplyRules");
+    await seedDefaultRules();
 
+    dbHealthCheck.startPeriodicCheck();
     return true;
   } catch (error) {
     logger.error("💥 Database initialization failed:", error.message);
     throw error;
   }
 }
-
-// Application startup sequence
 async function startApplication() {
   try {
-    // Initialize database
     await initializeDatabase();
-
-    // Load existing WhatsApp sessions
     await loadExistingSessions();
     logger.info("📱 All existing sessions loaded");
-
-    // Start file cleanup manager
     fileCleanup.startAutoCleanup();
     logger.info("🧹 File cleanup manager started");
-
-    // Start the server
     server.listen(port, () => {
       logger.info(`🚀 Server running at http://localhost:${port}`);
       logger.info(`🌍 Environment: ${envConfig.NODE_ENV}`);
@@ -342,15 +289,9 @@ async function startApplication() {
     process.exit(1);
   }
 }
-
-// Removed shutdown handlers
-
-// Basic error handling (non-graceful)
 process.on("uncaughtException", (error) => {
   logger.error("💥 Uncaught Exception:", error);
-  // Don't exit, just log the error
 });
-
 process.on("unhandledRejection", (reason, promise) => {
   logger.error("💥 Unhandled Rejection Details:", {
     promise: promise,
@@ -360,8 +301,5 @@ process.on("unhandledRejection", (reason, promise) => {
     message: reason?.message || "No message",
     code: reason?.code || "No code",
   });
-  // Don't exit, just log the error
 });
-
-// Start the application
 startApplication();

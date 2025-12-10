@@ -2,31 +2,23 @@ const fs = require("fs");
 const xlsx = require("xlsx");
 const { getSock } = require("../auth/session");
 const Blast = require("../models/blastModel");
-const logger = require("../utils/logger"); // Mengimpor logger
+const logger = require("../utils/logger"); 
 const MessageStatusModel = require("../models/messageStatusModel");
 const { getSocket } = require("../auth/socket");
 const Boom = require("@hapi/boom");
 const SpinTextEngine = require("../utils/spinTextEngine");
 const BlastRealTimeService = require("./blastRealTimeService");
-
-// Create singleton instance
-const blastRealTimeService = new BlastRealTimeService(); // Import real-time service
-
+const blastRealTimeService = new BlastRealTimeService(); 
 function randomDelay(min = 60, max = 120) {
   return Math.floor(Math.random() * (max - min + 1) + min) * 1000;
 }
-
 function replaceVariablesInMessage(template, data) {
-  // First, apply spin text processing
   const spunTemplate = SpinTextEngine.parseSpinText(template);
-
-  // Then replace variables like {name}, {company}, etc.
   const regex = /\{(\w+)\}/g;
   return spunTemplate.replace(regex, (_, variableName) => {
     return data?.[variableName] ?? "";
   });
 }
-
 async function processExcelAndSendMessages(
   filePath,
   sessionId,
@@ -56,11 +48,9 @@ async function processExcelAndSendMessages(
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       rows = xlsx.utils.sheet_to_json(sheet);
     }
-
     logger.info(`Processed rows: ${JSON.stringify(rows)}`);
     const sock = getSock(sessionId);
     const io = getSocket();
-
     const campaignId = `campaign-${Date.now()}-${notifyNumber}`;
     const resultsSocket = {
       id: campaignId,
@@ -73,9 +63,7 @@ async function processExcelAndSendMessages(
       status: "in-progress",
       userId,
     };
-
     const results = [];
-
     if (!sock || typeof sock.sendMessage !== "function") {
       await emitFailure(
         `Session "${sessionId}" tidak ditemukan atau tidak valid`,
@@ -83,34 +71,25 @@ async function processExcelAndSendMessages(
       );
       return [];
     }
-
-    // Check if template has spin text and log info
     const hasSpinText = SpinTextEngine.hasSpinText(messageTemplate);
     const estimatedVariations =
       SpinTextEngine.estimateVariations(messageTemplate);
-
     logger.info(
       `🚀 Mulai proses blast dengan sessionId: ${sessionId}, total kontak: ${rows.length}`
     );
-
     if (hasSpinText) {
       logger.info(
         `🎲 Spin text detected! Estimated variations: ${estimatedVariations}`
       );
     }
-
     function emitSocket() {
-      // Calculate accurate progress percentage
       const processedCount = resultsSocket.success + resultsSocket.failed;
       resultsSocket.progress = Math.min(
         100,
         Math.round((processedCount / resultsSocket.total) * 100)
       );
-      
-      // Enhanced real-time emission using blastRealTimeService
       if (campaignId) {
         try {
-          // Create session-like object for progress calculation
           const sessionData = {
             sessionId: campaignId,
             totalMessages: resultsSocket.total,
@@ -119,8 +98,6 @@ async function processExcelAndSendMessages(
             skippedCount: 0,
             status: resultsSocket.status || "PROCESSING"
           };
-
-          // Emit real-time progress update
           blastRealTimeService.emitSessionProgress(campaignId, {
             processedCount,
             totalMessages: resultsSocket.total,
@@ -129,7 +106,6 @@ async function processExcelAndSendMessages(
             progressPercentage: resultsSocket.progress,
             reason: 'Real-time blast progress update'
           });
-
           logger.info(
             `📡 Enhanced emit status: ${resultsSocket.progress}% | Processed: ${processedCount}/${resultsSocket.total} | Success: ${resultsSocket.success} | Failed: ${resultsSocket.failed}`
           );
@@ -137,16 +113,11 @@ async function processExcelAndSendMessages(
           logger.warn(`⚠️ Failed to emit enhanced progress, falling back to legacy:`, emitError.message);
         }
       }
-      
-      // Legacy socket emission for backward compatibility
       io?.emit("blast-status", resultsSocket);
-      
-      // Also log for debugging
       logger.info(
         `📡 Legacy emit status: ${resultsSocket.progress}% | Processed: ${processedCount}/${resultsSocket.total} | Success: ${resultsSocket.success} | Failed: ${resultsSocket.failed}`
       );
     }
-
     async function emitFailure(reason, failedCount) {
       logger.error(`❌ ${reason}`);
       await Blast.upsert({
@@ -162,7 +133,6 @@ async function processExcelAndSendMessages(
       resultsSocket.status = "error";
       emitSocket();
     }
-
     function withTimeout(promise, timeout = 15000) {
       return Promise.race([
         promise,
@@ -171,12 +141,10 @@ async function processExcelAndSendMessages(
         ),
       ]);
     }
-
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       const phone = String(row["no"]).replace(/\D/g, "");
       const message = replaceVariablesInMessage(messageTemplate, row);
-
       if (!phone || !message) {
         logger.warn(`⚠️ Baris ${i + 1}: Nomor atau pesan kosong`);
         results.push({
@@ -185,8 +153,6 @@ async function processExcelAndSendMessages(
           reason: "Missing phone/message",
         });
         resultsSocket.failed++;
-        
-        // Emit real-time failed notification
         if (campaignId) {
           try {
             await blastRealTimeService.emitFailedMessage(campaignId, {
@@ -197,24 +163,21 @@ async function processExcelAndSendMessages(
               errorMessage: "Missing phone number or message content",
               errorCode: "MISSING_DATA",
               retryCount: 0,
-              maxRetries: 0, // No retry for validation errors
+              maxRetries: 0, 
               failedAt: new Date().toISOString()
             });
           } catch (emitError) {
             logger.warn(`⚠️ Failed to emit failed notification: ${emitError.message}`);
           }
         }
-        
         emitSocket();
         continue;
       }
-
       try {
         logger.info(`🔍 Mengecek nomor WhatsApp: ${phone}`);
         const [check] = await withTimeout(
           sock.onWhatsApp(`${phone}@s.whatsapp.net`)
         );
-
         if (!check?.exists) {
           logger.warn(`❌ Nomor tidak ditemukan di WhatsApp: ${phone}`);
           results.push({
@@ -223,8 +186,6 @@ async function processExcelAndSendMessages(
             reason: "Nomor tidak aktif di WhatsApp",
           });
           resultsSocket.failed++;
-          
-          // Emit real-time failed notification for inactive number
           if (campaignId) {
             try {
               await blastRealTimeService.emitFailedMessage(campaignId, {
@@ -235,18 +196,16 @@ async function processExcelAndSendMessages(
                 errorMessage: "Phone number is not active on WhatsApp",
                 errorCode: "INACTIVE_NUMBER",
                 retryCount: 0,
-                maxRetries: 0, // No retry for inactive numbers
+                maxRetries: 0, 
                 failedAt: new Date().toISOString()
               });
             } catch (emitError) {
               logger.warn(`⚠️ Failed to emit failed notification: ${emitError.message}`);
             }
           }
-          
           emitSocket();
           continue;
         }
-
         logger.info(`✉️ Mengirim pesan ke: ${phone}`);
         const sentMsg = await withTimeout(
           sock.sendMessage(`${phone}@s.whatsapp.net`, { text: message })
@@ -254,7 +213,6 @@ async function processExcelAndSendMessages(
         logger.info(
           `✅ Pesan terkirim ke: ${phone}, messageId: ${sentMsg.key.id}`
         );
-
         try {
           await MessageStatusModel.upsert({
             messageId: sentMsg.key.id,
@@ -275,13 +233,9 @@ async function processExcelAndSendMessages(
             userId,
             sessionId,
           });
-          // Jangan throw error, biarkan proses blast lanjut
         }
-
         results.push({ phone, status: "success", messageId: sentMsg.key.id });
         resultsSocket.success++;
-        
-        // Emit real-time success notification if sessionId is available for blast campaigns
         if (campaignId) {
           try {
             await blastRealTimeService.emitSuccessMessage(campaignId, {
@@ -295,8 +249,6 @@ async function processExcelAndSendMessages(
             logger.warn(`⚠️ Failed to emit success notification: ${emitError.message}`);
           }
         }
-
-        // Emit progress update after success
         emitSocket();
       } catch (err) {
         const isSessionError =
@@ -305,14 +257,10 @@ async function processExcelAndSendMessages(
           );
         const isTimeoutError =
           Boom.isBoom(err) && err.output?.statusCode === 408;
-
         logger.error(`❌ Gagal kirim ke ${phone}: ${err.message}`);
-
-        // Determine error type for better categorization
         let errorType = "unknown_error";
         let errorCode = "UNKNOWN_ERROR";
         let canRetry = true;
-
         if (isTimeoutError) {
           errorType = "timeout_error";
           errorCode = "TIMEOUT";
@@ -323,8 +271,6 @@ async function processExcelAndSendMessages(
             reason: "Timeout saat verifikasi nomor",
           });
           resultsSocket.failed++;
-          
-          // Emit timeout error notification
           if (campaignId) {
             try {
               await blastRealTimeService.emitFailedMessage(campaignId, {
@@ -342,11 +288,9 @@ async function processExcelAndSendMessages(
               logger.warn(`⚠️ Failed to emit timeout notification: ${emitError.message}`);
             }
           }
-          
           emitSocket();
-          continue; // skip dan lanjut ke nomor berikutnya
+          continue; 
         }
-
         if (isSessionError) {
           errorType = "session_error";
           errorCode = "SESSION_DISCONNECTED";
@@ -359,11 +303,8 @@ async function processExcelAndSendMessages(
           errorCode = "NUMBER_BLOCKED";
           canRetry = false;
         }
-
         results.push({ phone, status: "error", reason: err.message });
         resultsSocket.failed++;
-
-        // Emit detailed failed message notification
         if (campaignId) {
           try {
             await blastRealTimeService.emitFailedMessage(campaignId, {
@@ -381,17 +322,11 @@ async function processExcelAndSendMessages(
             logger.warn(`⚠️ Failed to emit error notification: ${emitError.message}`);
           }
         }
-
         if (isSessionError) {
-          // Hitung sisa nomor yang belum diproses
           const remainingCount = rows.length - (i + 1);
           logger.error(`❌ Session WhatsApp terputus saat proses`);
-
-          // Tambahkan sisa nomor yang belum diproses ke failed count
           resultsSocket.failed += remainingCount;
           resultsSocket.status = "error";
-
-          // Tambahkan detail nomor yang belum diproses ke results
           for (let j = i + 1; j < rows.length; j++) {
             const remainingRow = rows[j];
             const remainingPhone = String(remainingRow["no"]).replace(
@@ -404,7 +339,6 @@ async function processExcelAndSendMessages(
               reason: "Session terputus sebelum pesan dikirim",
             });
           }
-
           await Blast.upsert({
             messageTemplate,
             totalRecipients: rows.length,
@@ -414,25 +348,19 @@ async function processExcelAndSendMessages(
             userId,
             campaignId,
           });
-
           emitSocket();
           break;
         }
       }
-
       emitSocket();
-
       if (i < rows.length - 1) {
         const delay = randomDelay();
         logger.info(`⏳ Delay sebelum nomor berikutnya: ${delay}ms`);
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
-
-    // Enhanced file cleanup with error handling
     if (selectTarget !== "input" && filePath) {
       try {
-        // Check if file exists before attempting to delete
         if (fs.existsSync(filePath)) {
           fs.unlinkSync(filePath);
           logger.info(`🧹 Excel file deleted: ${filePath}`);
@@ -444,14 +372,11 @@ async function processExcelAndSendMessages(
           `❌ Failed to delete Excel file ${filePath}:`,
           error.message
         );
-        // Don't throw error, just log it as file cleanup is not critical
       }
     }
-
     if (resultsSocket.status !== "error") {
       resultsSocket.status = "completed";
       emitSocket();
-
       await Blast.upsert({
         messageTemplate,
         totalRecipients: rows.length,
@@ -461,12 +386,9 @@ async function processExcelAndSendMessages(
         userId,
         campaignId,
       });
-
       logger.info(
         `📦 Campaign selesai. Total: ${rows.length} | Sukses: ${resultsSocket.success} | Gagal: ${resultsSocket.failed}`
       );
-
-      // Log detail nomor yang gagal untuk debugging
       const failedNumbers = results.filter((r) => r.status === "error");
       if (failedNumbers.length > 0) {
         logger.info(`📋 Detail nomor yang gagal:`);
@@ -475,18 +397,14 @@ async function processExcelAndSendMessages(
         });
       }
     }
-
     const failedNumbers = results.filter((r) => r.status === "error");
     const sessionDisconnectedCount = failedNumbers.filter(
       (r) => r.reason === "Session terputus sebelum pesan dikirim"
     ).length;
-
     let report = `📦 Campaign selesai. Total: ${rows.length} | Sukses: ${resultsSocket.success} | Gagal: ${resultsSocket.failed}`;
-
     if (sessionDisconnectedCount > 0) {
       report += `\n⚠️ ${sessionDisconnectedCount} nomor tidak diproses karena session terputus`;
     }
-
     if (notifyNumber && sock) {
       try {
         logger.info(`📲 Mengirim notifikasi ke ${notifyNumber}`);
@@ -515,8 +433,6 @@ async function processExcelAndSendMessages(
       userId,
       selectTarget,
     });
-
-    // Emit error status
     const io = getSocket();
     if (io) {
       io.emit("blast-status", {
@@ -530,9 +446,7 @@ async function processExcelAndSendMessages(
         error: error.message,
       });
     }
-
-    throw error; // Re-throw untuk di-handle di controller
+    throw error; 
   }
 }
-
 module.exports = { processExcelAndSendMessages };

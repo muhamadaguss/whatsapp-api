@@ -5,12 +5,10 @@ const User = require("../models/userModel");
 const logger = require("../utils/logger");
 const { asyncHandler, AppError } = require("../middleware/errorHandler");
 const MessageTypeClassifier = require("../utils/messageTypeClassifier");
-
 const historyCampaign = asyncHandler(async (req, res) => {
   const userId = req.user.id;
-
   const now = new Date();
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1); // 1st day of current month
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1); 
   const endOfMonth = new Date(
     now.getFullYear(),
     now.getMonth() + 1,
@@ -19,13 +17,12 @@ const historyCampaign = asyncHandler(async (req, res) => {
     59,
     59,
     999
-  ); // last day of current month
-
+  ); 
   const campaigns = await Blast.findAll({
     where: {
       userId,
       createdAt: {
-        [Op.between]: [startOfMonth, endOfMonth], // Filter hanya yang bulan ini
+        [Op.between]: [startOfMonth, endOfMonth], 
       },
     },
     include: [
@@ -35,29 +32,25 @@ const historyCampaign = asyncHandler(async (req, res) => {
         attributes: ["id", "username", "role"],
       },
     ],
-    order: [["createdAt", "DESC"]], // opsional: urutkan terbaru dulu
+    order: [["createdAt", "DESC"]], 
   });
-
   return res.status(200).json({
     status: "success",
     campaigns,
   });
 });
-
 const getDataCampaign = asyncHandler(async (req, res) => {
   const userId = req.user.id;
   const { period } = req.body;
-
   const now = new Date();
   let startDate, endDate;
-
   switch (period) {
     case "today":
       startDate = new Date(now.setHours(0, 0, 0, 0));
       endDate = new Date(now.setHours(23, 59, 59, 999));
       break;
     case "weekly": {
-      const day = now.getDay(); // 0 = Sunday, 1 = Monday, ...
+      const day = now.getDay(); 
       const diffToMonday = (day === 0 ? -6 : 1) - day;
       startDate = new Date(now);
       startDate.setDate(now.getDate() + diffToMonday);
@@ -81,7 +74,6 @@ const getDataCampaign = asyncHandler(async (req, res) => {
       );
       break;
   }
-
   const campaigns = await Blast.findAll({
     where: {
       userId,
@@ -98,25 +90,20 @@ const getDataCampaign = asyncHandler(async (req, res) => {
     ],
     order: [["createdAt", "DESC"]],
   });
-
   return res.status(200).json({
     status: "success",
     campaigns,
   });
 });
-
 const getMessageTrends = asyncHandler(async (req, res) => {
   const userId = req.user.id;
   const { period } = req.body;
-
   const now = new Date();
   let startDate, endDate, groupByExpression, orderByExpression;
-
   switch (period) {
     case "today":
       startDate = new Date(now.setHours(0, 0, 0, 0));
       endDate = new Date(now.setHours(23, 59, 59, 999));
-      // PostgreSQL: Extract hour and format as "HH:00"
       groupByExpression = sequelize.fn(
         "TO_CHAR",
         sequelize.col("createdAt"),
@@ -136,7 +123,6 @@ const getMessageTrends = asyncHandler(async (req, res) => {
       endDate = new Date(startDate);
       endDate.setDate(startDate.getDate() + 6);
       endDate.setHours(23, 59, 59, 999);
-      // PostgreSQL: Get day name (Mon, Tue, etc.)
       groupByExpression = sequelize.fn(
         "TO_CHAR",
         sequelize.col("createdAt"),
@@ -160,7 +146,6 @@ const getMessageTrends = asyncHandler(async (req, res) => {
         59,
         999
       );
-      // PostgreSQL: Format as "Day DD"
       groupByExpression = sequelize.fn(
         "TO_CHAR",
         sequelize.col("createdAt"),
@@ -172,8 +157,6 @@ const getMessageTrends = asyncHandler(async (req, res) => {
       );
       break;
   }
-
-  // Get aggregated data by time period
   const trends = await Blast.findAll({
     attributes: [
       [groupByExpression, "name"],
@@ -191,8 +174,6 @@ const getMessageTrends = asyncHandler(async (req, res) => {
     order: [[orderByExpression, "ASC"]],
     raw: true,
   });
-
-  // Fill missing time slots with zero values
   const filledTrends = [];
   if (period === "today") {
     for (let i = 0; i < 24; i++) {
@@ -233,20 +214,16 @@ const getMessageTrends = asyncHandler(async (req, res) => {
       });
     }
   }
-
   return res.status(200).json({
     status: "success",
     trends: filledTrends,
   });
 });
-
 const getMessageTypePerformance = asyncHandler(async (req, res) => {
   const userId = req.user.id;
   const { period } = req.body;
-
   const now = new Date();
   let startDate, endDate;
-
   switch (period) {
     case "today":
       startDate = new Date(now.setHours(0, 0, 0, 0));
@@ -277,8 +254,6 @@ const getMessageTypePerformance = asyncHandler(async (req, res) => {
       );
       break;
   }
-
-  // Get campaigns and categorize by message content
   const campaigns = await Blast.findAll({
     where: {
       userId,
@@ -294,11 +269,7 @@ const getMessageTypePerformance = asyncHandler(async (req, res) => {
     ],
     raw: true,
   });
-
-  // Initialize message type classifier
   const classifier = new MessageTypeClassifier();
-
-  // Categorize messages by type using advanced classifier
   const messageTypes = {
     Promo: { success: 0, failed: 0, total: 0 },
     Updates: { success: 0, failed: 0, total: 0 },
@@ -306,19 +277,14 @@ const getMessageTypePerformance = asyncHandler(async (req, res) => {
     Welcome: { success: 0, failed: 0, total: 0 },
     Support: { success: 0, failed: 0, total: 0 },
   };
-
   campaigns.forEach((campaign) => {
-    // Use advanced classifier instead of simple keyword matching
     const category = classifier.classify(campaign.messageTemplate);
-
     messageTypes[category].success += campaign.sentCount || 0;
     messageTypes[category].failed += campaign.failedCount || 0;
     messageTypes[category].total += campaign.totalRecipients || 0;
   });
-
-  // Convert to array format and calculate percentages
   const performance = Object.entries(messageTypes).map(([name, data]) => {
-    const total = data.total || 1; // Avoid division by zero
+    const total = data.total || 1; 
     return {
       name,
       success: Math.round((data.success / total) * 100),
@@ -326,13 +292,11 @@ const getMessageTypePerformance = asyncHandler(async (req, res) => {
       totalMessages: data.total,
     };
   });
-
   return res.status(200).json({
     status: "success",
     performance,
   });
 });
-
 module.exports = {
   historyCampaign,
   getDataCampaign,

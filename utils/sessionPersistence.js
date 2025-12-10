@@ -2,30 +2,16 @@ const logger = require("./logger");
 const BlastSession = require("../models/blastSessionModel");
 const BlastMessage = require("../models/blastMessageModel");
 const blastSessionManager = require("./blastSessionManager");
-
-/**
- * SessionPersistence - Handles session persistence and recovery
- * Manages database operations for session state management
- */
 class SessionPersistence {
   constructor() {
     this.recoveryInProgress = false;
   }
-
-  /**
-   * Save session state to database
-   * @param {string} sessionId - Session ID
-   * @param {Object} state - Session state to save
-   * @returns {boolean} - Success status
-   */
   async saveSessionState(sessionId, state) {
     try {
       const session = await BlastSession.findBySessionId(sessionId);
-
       if (!session) {
         throw new Error(`Session ${sessionId} not found`);
       }
-
       await session.update({
         status: state.status,
         currentIndex: state.currentIndex,
@@ -44,7 +30,6 @@ class SessionPersistence {
           stoppedAt: new Date(),
         }),
       });
-
       logger.debug(`💾 Session state saved for ${sessionId}: ${state.status}`);
       return true;
     } catch (error) {
@@ -52,27 +37,17 @@ class SessionPersistence {
       return false;
     }
   }
-
-  /**
-   * Load session state from database
-   * @param {string} sessionId - Session ID
-   * @returns {Object|null} - Session state or null if not found
-   */
   async loadSessionState(sessionId) {
     try {
       const session = await BlastSession.findBySessionId(sessionId);
-
       if (!session) {
         return null;
       }
-
-      // Get message statistics
       const stats = await BlastMessage.getSessionStats(sessionId);
       const statsMap = stats.reduce((acc, stat) => {
         acc[stat.status] = parseInt(stat.count);
         return acc;
       }, {});
-
       return {
         sessionId: session.sessionId,
         userId: session.userId,
@@ -105,70 +80,42 @@ class SessionPersistence {
       return null;
     }
   }
-
-  /**
-   * Get all active sessions for recovery
-   * @param {number} userId - User ID (optional)
-   * @returns {Array} - Array of active session states
-   */
   async getActiveSessions(userId = null) {
     try {
       const whereClause = {
         status: ["RUNNING", "PAUSED"],
       };
-
       if (userId) {
         whereClause.userId = userId;
       }
-
       const sessions = await BlastSession.findAll({
         where: whereClause,
-        // include: [
-        //   {
-        //     model: require("../models/userModel"),
-        //     as: "user",
-        //     attributes: ["id", "username", "role"],
-        //   },
-        // ],
         order: [["updatedAt", "DESC"]],
       });
-
       const activeStates = [];
-
       for (const session of sessions) {
         const state = await this.loadSessionState(session.sessionId);
         if (state) {
           activeStates.push(state);
         }
       }
-
       return activeStates;
     } catch (error) {
       logger.error(`❌ Failed to get active sessions:`, error);
       return [];
     }
   }
-
-  /**
-   * Recover sessions after server restart
-   * @param {number} userId - User ID (optional)
-   * @returns {Object} - Recovery result
-   */
   async recoverSessions(userId = null) {
     if (this.recoveryInProgress) {
       logger.warn(`⚠️ Session recovery already in progress`);
       return { success: false, message: "Recovery already in progress" };
     }
-
     this.recoveryInProgress = true;
-
     try {
       logger.info(
         `🔄 Starting session recovery${userId ? ` for user ${userId}` : ""}...`
       );
-
       const activeSessions = await this.getActiveSessions(userId);
-
       if (activeSessions.length === 0) {
         logger.info(`✅ No active sessions to recover`);
         return {
@@ -177,20 +124,16 @@ class SessionPersistence {
           message: "No active sessions found",
         };
       }
-
       const recoveredSessions = [];
       const failedRecoveries = [];
-
       for (const sessionState of activeSessions) {
         try {
-          // Restore session to blast session manager
           blastSessionManager.activeSessions.set(sessionState.sessionId, {
             sessionId: sessionState.sessionId,
             status: sessionState.status,
             userId: sessionState.userId,
             recoveredAt: new Date(),
           });
-
           recoveredSessions.push({
             sessionId: sessionState.sessionId,
             status: sessionState.status,
@@ -199,7 +142,6 @@ class SessionPersistence {
             progressPercentage: sessionState.progressPercentage,
             userId: sessionState.userId,
           });
-
           logger.info(
             `✅ Recovered session: ${sessionState.sessionId} (${sessionState.status})`
           );
@@ -214,11 +156,9 @@ class SessionPersistence {
           });
         }
       }
-
       logger.info(
         `🔄 Session recovery completed: ${recoveredSessions.length} recovered, ${failedRecoveries.length} failed`
       );
-
       return {
         success: true,
         recoveredSessions,
@@ -236,36 +176,23 @@ class SessionPersistence {
       this.recoveryInProgress = false;
     }
   }
-
-  /**
-   * Clean up old completed sessions
-   * @param {number} daysOld - Days old to clean up (default: 30)
-   * @param {number} userId - User ID (optional)
-   * @returns {Object} - Cleanup result
-   */
   async cleanupOldSessions(daysOld = 30, userId = null) {
     try {
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - daysOld);
-
       const whereClause = {
         status: ["COMPLETED", "STOPPED", "ERROR"],
         updatedAt: {
           [require("sequelize").Op.lt]: cutoffDate,
         },
       };
-
       if (userId) {
         whereClause.userId = userId;
       }
-
-      // First, get sessions to be deleted for logging
       const sessionsToDelete = await BlastSession.findAll({
         where: whereClause,
         attributes: ["sessionId", "campaignName", "status", "updatedAt"],
       });
-
-      // Delete messages first (due to foreign key constraint)
       let deletedMessagesCount = 0;
       for (const session of sessionsToDelete) {
         const messageCount = await BlastMessage.destroy({
@@ -273,16 +200,12 @@ class SessionPersistence {
         });
         deletedMessagesCount += messageCount;
       }
-
-      // Then delete sessions
       const deletedSessionsCount = await BlastSession.destroy({
         where: whereClause,
       });
-
       logger.info(
         `🗑️ Cleaned up ${deletedSessionsCount} old sessions and ${deletedMessagesCount} messages`
       );
-
       return {
         success: true,
         deletedSessions: deletedSessionsCount,
@@ -297,40 +220,21 @@ class SessionPersistence {
       };
     }
   }
-
-  /**
-   * Get session history for user
-   * @param {number} userId - User ID
-   * @param {number} limit - Limit number of results (default: 50)
-   * @param {number} offset - Offset for pagination (default: 0)
-   * @returns {Object} - Session history
-   */
   async getSessionHistory(userId, limit = 50, offset = 0) {
     try {
       const { count, rows: sessions } = await BlastSession.findAndCountAll({
         where: { userId },
-        // include: [
-        //   {
-        //     model: require("../models/userModel"),
-        //     as: "user",
-        //     attributes: ["id", "username"],
-        //   },
-        // ],
         order: [["createdAt", "DESC"]],
         limit,
         offset,
       });
-
       const sessionHistory = [];
-
       for (const session of sessions) {
-        // Get message statistics for each session
         const stats = await BlastMessage.getSessionStats(session.sessionId);
         const statsMap = stats.reduce((acc, stat) => {
           acc[stat.status] = parseInt(stat.count);
           return acc;
         }, {});
-
         sessionHistory.push({
           sessionId: session.sessionId,
           campaignName: session.campaignName,
@@ -347,7 +251,6 @@ class SessionPersistence {
           duration: this.calculateSessionDuration(session),
         });
       }
-
       return {
         success: true,
         total: count,
@@ -369,37 +272,21 @@ class SessionPersistence {
       };
     }
   }
-
-  /**
-   * Calculate session duration
-   * @param {Object} session - Session object
-   * @returns {Object} - Duration information
-   */
   calculateSessionDuration(session) {
     const startTime = session.startedAt;
     const endTime = session.completedAt || session.stoppedAt || new Date();
-
     if (!startTime) {
       return { duration: null, durationMs: null };
     }
-
     const durationMs = new Date(endTime) - new Date(startTime);
     const duration = this.formatDuration(durationMs);
-
     return { duration, durationMs };
   }
-
-  /**
-   * Format duration in human readable format
-   * @param {number} durationMs - Duration in milliseconds
-   * @returns {string} - Formatted duration
-   */
   formatDuration(durationMs) {
     const seconds = Math.floor(durationMs / 1000);
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
     const days = Math.floor(hours / 24);
-
     if (days > 0) {
       return `${days}d ${hours % 24}h ${minutes % 60}m`;
     } else if (hours > 0) {
@@ -410,50 +297,35 @@ class SessionPersistence {
       return `${seconds}s`;
     }
   }
-
-  /**
-   * Validate session integrity
-   * @param {string} sessionId - Session ID
-   * @returns {Object} - Validation result
-   */
   async validateSessionIntegrity(sessionId) {
     try {
       const session = await BlastSession.findBySessionId(sessionId);
-
       if (!session) {
         return {
           valid: false,
           issues: ["Session not found"],
         };
       }
-
       const issues = [];
-
-      // Check message count consistency
       const messageCount = await BlastMessage.count({
         where: { sessionId },
       });
-
       if (messageCount !== session.totalMessages) {
         issues.push(
           `Message count mismatch: expected ${session.totalMessages}, found ${messageCount}`
         );
       }
-
-      // Check status consistency
       const stats = await BlastMessage.getSessionStats(sessionId);
       const statsMap = stats.reduce((acc, stat) => {
         acc[stat.status] = parseInt(stat.count);
         return acc;
       }, {});
-
       const totalProcessed =
         (statsMap.sent || 0) + (statsMap.failed || 0) + (statsMap.skipped || 0);
       const expectedProgress =
         session.totalMessages > 0
           ? ((totalProcessed / session.totalMessages) * 100).toFixed(2)
           : 0;
-
       if (
         Math.abs(
           parseFloat(session.progressPercentage) - parseFloat(expectedProgress)
@@ -463,7 +335,6 @@ class SessionPersistence {
           `Progress percentage mismatch: stored ${session.progressPercentage}%, calculated ${expectedProgress}%`
         );
       }
-
       return {
         valid: issues.length === 0,
         issues,
@@ -487,6 +358,4 @@ class SessionPersistence {
     }
   }
 }
-
-// Export singleton instance
 module.exports = new SessionPersistence();

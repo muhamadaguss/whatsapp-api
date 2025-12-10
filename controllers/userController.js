@@ -1,11 +1,9 @@
 const UserModel = require('../models/userModel')
 const { asyncHandler, AppError } = require('../middleware/errorHandler')
-
 const getUsers = asyncHandler(async (req, res) => {
     const users = await UserModel.findAll()
     res.json(users)
 })
-
 const updateActive = asyncHandler(async (req, res) => {
     const { id } = req.params
     const user = await UserModel.findByPk(id)

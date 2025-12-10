@@ -1,6 +1,5 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("./db");
-
 const ChatMessage = sequelize.define(
   "ChatMessage",
   {
@@ -9,11 +8,10 @@ const ChatMessage = sequelize.define(
       primaryKey: true,
       autoIncrement: true,
     },
-    // ✨ NEW: Add WhatsApp message ID for deduplication
     messageId: {
       type: DataTypes.STRING,
       allowNull: true,
-      unique: true, // Prevent duplicate WhatsApp messages
+      unique: true, 
     },
     sessionId: {
       type: DataTypes.STRING,
@@ -58,7 +56,6 @@ const ChatMessage = sequelize.define(
   {
     timestamps: true,
     tableName: "chat_messages",
-    // ✨ NEW: Add composite index for better deduplication
     indexes: [
       {
         unique: true,
@@ -66,12 +63,10 @@ const ChatMessage = sequelize.define(
         name: 'chat_messages_messageId_unique'
       },
       {
-        // Index untuk query performance
         fields: ['sessionId', 'timestamp'],
         name: 'chat_messages_session_timestamp_idx'
       }
     ]
   }
 );
-
 module.exports = ChatMessage;

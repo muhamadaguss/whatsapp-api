@@ -7,7 +7,6 @@ const {
   getMessageTypePerformance,
 } = require("../controllers/campaignController");
 const { verifyToken } = require("../middleware/authMiddleware");
-
 router.get("/historyCampaign", verifyToken, historyCampaign);
 router.post("/getDataCampaign", verifyToken, getDataCampaign);
 router.post("/getMessageTrends", verifyToken, getMessageTrends);
@@ -16,5 +15,4 @@ router.post(
   verifyToken,
   getMessageTypePerformance
 );
-
 module.exports = router;

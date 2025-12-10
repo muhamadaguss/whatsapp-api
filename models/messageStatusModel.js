@@ -1,7 +1,5 @@
-// models/messageStatusModel.js
 const { DataTypes } = require("sequelize");
 const sequelize = require("./db");
-
 const MessageStatus = sequelize.define(
   "MessageStatus",
   {
@@ -45,5 +43,4 @@ const MessageStatus = sequelize.define(
     tableName: "message_statuses",
   }
 );
-
 module.exports = MessageStatus;

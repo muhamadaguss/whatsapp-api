@@ -1,24 +1,17 @@
 const SpinTextEngine = require("../utils/spinTextEngine");
 const { asyncHandler, AppError } = require("../middleware/errorHandler");
 const logger = require("../utils/logger");
-
-/**
- * Preview spin text variations
- */
 const previewSpinText = asyncHandler(async (req, res) => {
   const { template, previewCount = 10 } = req.body;
-
   if (!template) {
     throw new AppError("Template is required", 400);
   }
-
   try {
     const sanitizedTemplate = SpinTextEngine.sanitizeTemplate(template);
     const preview = SpinTextEngine.previewVariations(
       sanitizedTemplate,
       parseInt(previewCount)
     );
-
     return res.status(200).json({
       status: "success",
       data: {
@@ -31,34 +24,24 @@ const previewSpinText = asyncHandler(async (req, res) => {
     throw new AppError("Failed to preview spin text", 500);
   }
 });
-
-/**
- * Validate spin text template
- */
 const validateSpinText = asyncHandler(async (req, res) => {
   const { template } = req.body;
-
   if (!template) {
     throw new AppError("Template is required", 400);
   }
-
   try {
     const sanitizedTemplate = SpinTextEngine.sanitizeTemplate(template);
     const hasSpinText = SpinTextEngine.hasSpinText(sanitizedTemplate);
     const estimatedVariations =
       SpinTextEngine.estimateVariations(sanitizedTemplate);
-
-    // Test parsing untuk detect errors
     let isValid = true;
     let errorMessage = null;
-
     try {
       SpinTextEngine.parseSpinText(sanitizedTemplate);
     } catch (error) {
       isValid = false;
       errorMessage = error.message;
     }
-
     return res.status(200).json({
       status: "success",
       data: {
@@ -74,27 +57,19 @@ const validateSpinText = asyncHandler(async (req, res) => {
     throw new AppError("Failed to validate spin text", 500);
   }
 });
-
-/**
- * Generate spin text variations
- */
 const generateVariations = asyncHandler(async (req, res) => {
   const { template, count = 10 } = req.body;
-
   if (!template) {
     throw new AppError("Template is required", 400);
   }
-
-  const maxCount = 50; // Limit untuk avoid performance issues
+  const maxCount = 50; 
   const requestedCount = Math.min(parseInt(count), maxCount);
-
   try {
     const sanitizedTemplate = SpinTextEngine.sanitizeTemplate(template);
     const variations = SpinTextEngine.generateVariations(
       sanitizedTemplate,
       requestedCount
     );
-
     return res.status(200).json({
       status: "success",
       data: {
@@ -109,7 +84,6 @@ const generateVariations = asyncHandler(async (req, res) => {
     throw new AppError("Failed to generate variations", 500);
   }
 });
-
 module.exports = {
   previewSpinText,
   validateSpinText,

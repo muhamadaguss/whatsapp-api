@@ -1,12 +1,9 @@
-// socket.js
 const { Server } = require("socket.io");
 const jwt = require("jsonwebtoken");
 const http = require("http");
 let io;
-
 function initSocket(server) {
   if (!io) {
-    // Get allowed origins from environment
     const allowedOrigins = process.env.ALLOWED_ORIGINS
       ? process.env.ALLOWED_ORIGINS.split(",").map((origin) => origin.trim())
       : [
@@ -16,7 +13,6 @@ function initSocket(server) {
           "http://localhost:8081",
           "http://127.0.0.1:8081",
         ];
-
     io = new Server(server, {
       cors: {
         origin: allowedOrigins,
@@ -24,19 +20,15 @@ function initSocket(server) {
         credentials: true,
       },
       transports: ["websocket", "polling"],
-      allowEIO3: true, // Allow Engine.IO v3 clients
+      allowEIO3: true, 
       pingTimeout: 60000,
       pingInterval: 25000,
     });
-
-    // Socket authentication middleware
     io.use((socket, next) => {
       const token = socket.handshake.auth.token || socket.handshake.headers.authorization?.replace('Bearer ', '');
-      
       if (!token) {
         return next(new Error('Authentication token required'));
       }
-
       try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         socket.userId = decoded.id;
@@ -46,26 +38,17 @@ function initSocket(server) {
         return next(new Error('Invalid authentication token'));
       }
     });
-
-    // Handle socket connections with user rooms
     io.on('connection', (socket) => {
       console.log(`User ${socket.userId} connected to socket: ${socket.id}`);
-      
-      // Join user-specific room
       socket.join(`user_${socket.userId}`);
-      
-      // Handle explicit room joining (for additional confirmation)
       socket.on('join_user_room', (userId) => {
         if (userId && socket.userId === userId) {
           socket.join(`user_${userId}`);
           console.log(`User ${userId} explicitly joined room: user_${userId}`);
         }
       });
-
-      // Test message handler for debugging
       socket.on('test_message', (data) => {
         console.log(`🧪 Test message received from user ${socket.userId}:`, data);
-        // Echo back the message
         socket.emit('test_response', { 
           message: 'Test successful', 
           original: data,
@@ -73,7 +56,6 @@ function initSocket(server) {
           timestamp: new Date()
         });
       });
-      
       socket.on('disconnect', () => {
         console.log(`User ${socket.userId} disconnected from socket: ${socket.id}`);
       });
@@ -81,12 +63,10 @@ function initSocket(server) {
   }
   return io;
 }
-
 function getSocket() {
   if (!io) {
     throw new Error("Socket.io has not been initialized.");
   }
   return io;
 }
-
 module.exports = { initSocket, getSocket };

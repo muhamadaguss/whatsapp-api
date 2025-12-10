@@ -1,10 +1,5 @@
 const { DataTypes } = require('sequelize');
 const sequelize = require('./db');
-
-/**
- * Auto-Retry Configuration Model
- * Stores configuration for automatic retry behavior per session
- */
 const RetryConfiguration = sequelize.define(
   'RetryConfiguration',
   {
@@ -23,8 +18,6 @@ const RetryConfiguration = sequelize.define(
       allowNull: false,
       comment: 'User who owns this configuration',
     },
-    
-    // Basic Retry Settings
     maxRetries: {
       type: DataTypes.INTEGER,
       defaultValue: 3,
@@ -32,7 +25,7 @@ const RetryConfiguration = sequelize.define(
     },
     retryDelay: {
       type: DataTypes.INTEGER,
-      defaultValue: 300, // 5 minutes
+      defaultValue: 300, 
       comment: 'Delay between retries in seconds',
     },
     exponentialBackoff: {
@@ -40,8 +33,6 @@ const RetryConfiguration = sequelize.define(
       defaultValue: true,
       comment: 'Use exponential backoff for retry delays',
     },
-    
-    // Business Hours Configuration
     businessHoursEnabled: {
       type: DataTypes.BOOLEAN,
       defaultValue: false,
@@ -64,11 +55,9 @@ const RetryConfiguration = sequelize.define(
     },
     businessDays: {
       type: DataTypes.JSON,
-      defaultValue: [1, 2, 3, 4, 5], // Monday to Friday
+      defaultValue: [1, 2, 3, 4, 5], 
       comment: 'Days of week for business hours (0=Sunday, 6=Saturday)',
     },
-    
-    // Rate Limiting Configuration
     messagesPerMinute: {
       type: DataTypes.INTEGER,
       defaultValue: 10,
@@ -89,8 +78,6 @@ const RetryConfiguration = sequelize.define(
       defaultValue: 3,
       comment: 'Maximum concurrent retry operations',
     },
-    
-    // Error Handling
     retryableErrors: {
       type: DataTypes.JSON,
       defaultValue: ['timeout', 'network', 'rate_limit'],
@@ -101,8 +88,6 @@ const RetryConfiguration = sequelize.define(
       defaultValue: true,
       comment: 'Skip messages that reached max retries',
     },
-    
-    // Safety Conditions
     errorRateThreshold: {
       type: DataTypes.FLOAT,
       defaultValue: 0.5,
@@ -113,8 +98,6 @@ const RetryConfiguration = sequelize.define(
       defaultValue: true,
       comment: 'Automatically pause when error rate is high',
     },
-    
-    // Notification Settings
     notificationsEnabled: {
       type: DataTypes.BOOLEAN,
       defaultValue: true,
@@ -130,8 +113,6 @@ const RetryConfiguration = sequelize.define(
       allowNull: true,
       comment: 'Webhook URL for notifications',
     },
-    
-    // Status and Control
     isEnabled: {
       type: DataTypes.BOOLEAN,
       defaultValue: false,
@@ -152,8 +133,6 @@ const RetryConfiguration = sequelize.define(
       allowNull: true,
       comment: 'Next scheduled retry time',
     },
-    
-    // Statistics
     totalRetryAttempts: {
       type: DataTypes.INTEGER,
       defaultValue: 0,
@@ -169,14 +148,11 @@ const RetryConfiguration = sequelize.define(
       defaultValue: 0,
       comment: 'Number of failed retries',
     },
-    
-    // Metadata
     configVersion: {
       type: DataTypes.STRING,
       defaultValue: '1.0',
       comment: 'Configuration schema version',
     },
-    
     createdAt: {
       type: DataTypes.DATE,
       allowNull: false,
@@ -208,87 +184,54 @@ const RetryConfiguration = sequelize.define(
     ],
   }
 );
-
-/**
- * Model Associations
- */
 RetryConfiguration.associate = (models) => {
-  // Associate with BlastSession
   RetryConfiguration.belongsTo(models.BlastSession, {
     foreignKey: 'sessionId',
     targetKey: 'sessionId',
     as: 'blastSession',
   });
-  
-  // Associate with User
   RetryConfiguration.belongsTo(models.User, {
     foreignKey: 'userId',
     as: 'user',
   });
 };
-
-/**
- * Instance Methods
- */
 RetryConfiguration.prototype.isBusinessHours = function() {
   if (!this.businessHoursEnabled) return true;
-  
   const now = new Date();
   const timezone = this.businessTimezone || 'Asia/Jakarta';
-  
-  // Convert to business timezone
   const businessTime = new Date(now.toLocaleString("en-US", {timeZone: timezone}));
   const dayOfWeek = businessTime.getDay();
   const currentTime = businessTime.getHours() * 60 + businessTime.getMinutes();
-  
-  // Check if current day is a business day
   if (!this.businessDays.includes(dayOfWeek)) {
     return false;
   }
-  
-  // Parse business hours
   const [startHour, startMinute] = this.businessHoursStart.split(':').map(Number);
   const [endHour, endMinute] = this.businessHoursEnd.split(':').map(Number);
-  
   const startTime = startHour * 60 + startMinute;
   const endTime = endHour * 60 + endMinute;
-  
   return currentTime >= startTime && currentTime <= endTime;
 };
-
 RetryConfiguration.prototype.getNextRetryDelay = function(retryCount = 1) {
   let delay = this.retryDelay;
-  
   if (this.exponentialBackoff) {
-    // Exponential backoff: delay * 2^(retryCount-1)
     delay = this.retryDelay * Math.pow(2, retryCount - 1);
-    // Cap at maximum 1 hour
     delay = Math.min(delay, 3600);
   }
-  
   return delay;
 };
-
 RetryConfiguration.prototype.shouldRetryError = function(errorType) {
   return this.retryableErrors.includes(errorType.toLowerCase());
 };
-
 RetryConfiguration.prototype.updateStats = function(success = true) {
   this.totalRetryAttempts += 1;
-  
   if (success) {
     this.successfulRetries += 1;
   } else {
     this.failedRetries += 1;
   }
-  
   this.lastRetryAt = new Date();
   return this.save();
 };
-
-/**
- * Class Methods
- */
 RetryConfiguration.getDefaultConfig = function() {
   return {
     maxRetries: 3,
@@ -312,5 +255,4 @@ RetryConfiguration.getDefaultConfig = function() {
     isEnabled: false,
   };
 };
-
 module.exports = RetryConfiguration;

@@ -1,7 +1,5 @@
-// /api/models/user.model.js
 const { DataTypes } = require("sequelize");
 const sequelize = require("./db");
-
 const User = sequelize.define(
   "User",
   {
@@ -12,8 +10,7 @@ const User = sequelize.define(
   },
   {
     timestamps: true,
-    tableName: "users", // Explicitly set table name to 'users'
+    tableName: "users", 
   }
 );
-
 module.exports = User;

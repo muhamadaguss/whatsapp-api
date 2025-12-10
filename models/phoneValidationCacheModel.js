@@ -1,14 +1,5 @@
-/**
- * Phone Validation Cache Model - PHASE 3 [P3-3]
- * 
- * Database model for Layer 3 cache (persistent, 7-day TTL)
- * 
- * @module phoneValidationCacheModel
- */
-
 const { DataTypes } = require("sequelize");
 const sequelize = require("../config/db");
-
 const PhoneValidationCache = sequelize.define(
   "PhoneValidationCache",
   {
@@ -58,5 +49,4 @@ const PhoneValidationCache = sequelize.define(
     ]
   }
 );
-
 module.exports = PhoneValidationCache;

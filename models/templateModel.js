@@ -1,7 +1,6 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("./db");
 const User = require("./userModel");
-
 const Template = sequelize.define(
   "Template",
   {
@@ -24,17 +23,14 @@ const Template = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
       defaultValue: "text",
-    }, // e.g., 'text', 'image', 'video'
+    }, 
   },
   {
     timestamps: true,
     tableName: "templates",
   }
 );
-
-// Association function for relationships
 Template.associate = function(models) {
   Template.belongsTo(models.User, { foreignKey: "userId", as: "user" });
 };
-
 module.exports = Template;

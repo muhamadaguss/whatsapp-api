@@ -1,15 +1,8 @@
-/**
- * Message Type Classifier
- * Sistem klasifikasi pesan yang lebih akurat dengan multiple keyword patterns
- */
-
 class MessageTypeClassifier {
   constructor() {
-    // Definisi kategori dengan keyword patterns yang lebih lengkap
     this.categories = {
       Promo: {
         keywords: [
-          // Bahasa Indonesia
           "promo",
           "diskon",
           "potongan",
@@ -34,7 +27,6 @@ class MessageTypeClassifier {
           "kupon",
           "cicilan",
           "dp",
-          // Bahasa Inggris
           "discount",
           "promotion",
           "special offer",
@@ -54,10 +46,8 @@ class MessageTypeClassifier {
           /\bbeli\s*\d+\s*gratis\s*\d+/i,
         ],
       },
-
       Updates: {
         keywords: [
-          // Bahasa Indonesia
           "update",
           "pembaruan",
           "info",
@@ -78,7 +68,6 @@ class MessageTypeClassifier {
           "status",
           "gangguan",
           "downtime",
-          // Bahasa Inggris
           "announcement",
           "notification",
           "alert",
@@ -91,16 +80,14 @@ class MessageTypeClassifier {
           "patch",
         ],
         patterns: [
-          /\bv\d+\.\d+/i, // version numbers
+          /\bv\d+\.\d+/i, 
           /\bversi\s*\d+/i,
           /\bupdate\s*(terbaru|baru)/i,
           /\bnew\s*(feature|update|version)/i,
         ],
       },
-
       Reminder: {
         keywords: [
-          // Bahasa Indonesia
           "reminder",
           "pengingat",
           "ingat",
@@ -122,7 +109,6 @@ class MessageTypeClassifier {
           "harap",
           "mohon",
           "diminta",
-          // Bahasa Inggris
           "remember",
           "dont forget",
           "expiry",
@@ -142,10 +128,8 @@ class MessageTypeClassifier {
           /\bexpir(es?|y|ed)\s*(on|dalam|in)/i,
         ],
       },
-
       Welcome: {
         keywords: [
-          // Bahasa Indonesia
           "welcome",
           "selamat datang",
           "halo",
@@ -166,7 +150,6 @@ class MessageTypeClassifier {
           "verifikasi",
           "konfirmasi",
           "onboarding",
-          // Bahasa Inggris
           "greetings",
           "congratulations",
           "welcome aboard",
@@ -184,10 +167,8 @@ class MessageTypeClassifier {
           /\bthank\s*you\s*for/i,
         ],
       },
-
       Support: {
         keywords: [
-          // Bahasa Indonesia
           "bantuan",
           "help",
           "support",
@@ -214,7 +195,6 @@ class MessageTypeClassifier {
           "faq",
           "hubungi",
           "contact",
-          // Bahasa Inggris
           "assistance",
           "technical support",
           "helpdesk",
@@ -234,69 +214,37 @@ class MessageTypeClassifier {
       },
     };
   }
-
-  /**
-   * Klasifikasi pesan berdasarkan konten
-   * @param {string} messageContent - Isi pesan yang akan diklasifikasi
-   * @returns {string} - Kategori pesan
-   */
   classify(messageContent) {
     if (!messageContent || typeof messageContent !== "string") {
-      return "Support"; // default
+      return "Support"; 
     }
-
     const content = messageContent.toLowerCase().trim();
     const scores = {};
-
-    // Hitung score untuk setiap kategori
     Object.entries(this.categories).forEach(([category, config]) => {
       scores[category] = this.calculateScore(content, config);
     });
-
-    // Cari kategori dengan score tertinggi
     const bestMatch = Object.entries(scores).reduce(
       (best, [category, score]) => {
         return score > best.score ? { category, score } : best;
       },
       { category: "Support", score: 0 }
     );
-
-    // Return kategori dengan score tertinggi, atau Support jika tidak ada yang match
     return bestMatch.score > 0 ? bestMatch.category : "Support";
   }
-
-  /**
-   * Hitung score untuk kategori tertentu
-   * @param {string} content - Isi pesan
-   * @param {object} config - Konfigurasi kategori (keywords dan patterns)
-   * @returns {number} - Score kategori
-   */
   calculateScore(content, config) {
     let score = 0;
-
-    // Score dari keyword matching
     config.keywords.forEach((keyword) => {
       if (content.includes(keyword.toLowerCase())) {
-        // Berikan score lebih tinggi untuk keyword yang lebih spesifik
         score += keyword.length > 5 ? 2 : 1;
       }
     });
-
-    // Score dari pattern matching
     config.patterns.forEach((pattern) => {
       if (pattern.test(content)) {
-        score += 3; // Pattern matching mendapat score lebih tinggi
+        score += 3; 
       }
     });
-
     return score;
   }
-
-  /**
-   * Dapatkan detail klasifikasi dengan confidence score
-   * @param {string} messageContent - Isi pesan
-   * @returns {object} - Detail klasifikasi
-   */
   classifyWithDetails(messageContent) {
     if (!messageContent || typeof messageContent !== "string") {
       return {
@@ -306,29 +254,22 @@ class MessageTypeClassifier {
         matchedPatterns: [],
       };
     }
-
     const content = messageContent.toLowerCase().trim();
     const results = {};
-
     Object.entries(this.categories).forEach(([category, config]) => {
       const matchedKeywords = config.keywords.filter((keyword) =>
         content.includes(keyword.toLowerCase())
       );
-
       const matchedPatterns = config.patterns.filter((pattern) =>
         pattern.test(content)
       );
-
       const score = this.calculateScore(content, config);
-
       results[category] = {
         score,
         matchedKeywords,
         matchedPatterns,
       };
     });
-
-    // Cari kategori terbaik
     const bestMatch = Object.entries(results).reduce(
       (best, [category, data]) => {
         return data.score > best.score ? { category, ...data } : best;
@@ -340,15 +281,12 @@ class MessageTypeClassifier {
         matchedPatterns: [],
       }
     );
-
-    // Hitung confidence (0-100%)
     const totalScore = Object.values(results).reduce(
       (sum, data) => sum + data.score,
       0
     );
     const confidence =
       totalScore > 0 ? Math.round((bestMatch.score / totalScore) * 100) : 0;
-
     return {
       category: bestMatch.category,
       confidence,
@@ -357,34 +295,19 @@ class MessageTypeClassifier {
       allScores: results,
     };
   }
-
-  /**
-   * Tambah keyword baru ke kategori
-   * @param {string} category - Nama kategori
-   * @param {string|array} keywords - Keyword baru
-   */
   addKeywords(category, keywords) {
     if (!this.categories[category]) {
       throw new Error(`Category '${category}' not found`);
     }
-
     const keywordsArray = Array.isArray(keywords) ? keywords : [keywords];
     this.categories[category].keywords.push(...keywordsArray);
   }
-
-  /**
-   * Tambah pattern baru ke kategori
-   * @param {string} category - Nama kategori
-   * @param {RegExp|array} patterns - Pattern baru
-   */
   addPatterns(category, patterns) {
     if (!this.categories[category]) {
       throw new Error(`Category '${category}' not found`);
     }
-
     const patternsArray = Array.isArray(patterns) ? patterns : [patterns];
     this.categories[category].patterns.push(...patternsArray);
   }
 }
-
 module.exports = MessageTypeClassifier;

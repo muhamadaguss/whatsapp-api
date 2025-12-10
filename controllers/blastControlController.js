@@ -7,31 +7,18 @@ const sessionPersistence = require("../utils/sessionPersistence");
 const BlastSession = require("../models/blastSessionModel");
 const BlastMessage = require("../models/blastMessageModel");
 const { AppError } = require("../middleware/errorHandler");
-const blastExecutionService = require("../services/blastExecutionService"); // Import blastExecutionService
-const xlsx = require("xlsx"); // Add Excel processing support
-const fs = require("fs"); // Add file system support
-const SpinTextEngine = require("../utils/spinTextEngine"); // Add spin text support
+const blastExecutionService = require("../services/blastExecutionService"); 
+const xlsx = require("xlsx"); 
+const fs = require("fs"); 
+const SpinTextEngine = require("../utils/spinTextEngine"); 
 const BlastRealTimeService = require("../services/blastRealTimeService");
-
-// Create singleton instance
-const blastRealTimeService = new BlastRealTimeService(); // Import real-time service
-
-// Phase 3 Services
+const blastRealTimeService = new BlastRealTimeService(); 
 const PhoneValidationService = require("../services/phoneValidationService");
 const AutoRetryService = require("../services/autoRetryService");
 const BulkOperationsService = require("../services/bulkOperationsService");
 const RetryConfiguration = require("../models/retryConfigurationModel");
-
-/**
- * Helper: Validate WhatsApp availability for session messages
- * @param {string} sessionId - Session ID
- * @param {string} whatsappSessionId - WhatsApp session ID
- * @param {boolean} skipValidation - Skip validation if true
- * @returns {Object} Validation result
- */
 const validateSessionPhoneNumbers = async (sessionId, whatsappSessionId, skipValidation = false) => {
   try {
-    // Skip validation if explicitly requested (for force-start)
     if (skipValidation) {
       return {
         success: true,
@@ -42,8 +29,6 @@ const validateSessionPhoneNumbers = async (sessionId, whatsappSessionId, skipVal
         details: []
       };
     }
-
-    // Get WhatsApp socket
     const sock = getSock(whatsappSessionId);
     if (!sock) {
       throw new AppError(
@@ -51,16 +36,13 @@ const validateSessionPhoneNumbers = async (sessionId, whatsappSessionId, skipVal
         400
       );
     }
-
-    // Get all pending messages for this session
     const messages = await BlastMessage.findAll({
       where: { 
         sessionId,
         status: 'pending'
       },
-      limit: 100 // Limit validation to first 100 numbers for performance
+      limit: 100 
     });
-
     if (messages.length === 0) {
       return {
         success: true,
@@ -71,31 +53,19 @@ const validateSessionPhoneNumbers = async (sessionId, whatsappSessionId, skipVal
         details: []
       };
     }
-
-    // ========== PHASE 1: SEQUENTIAL VALIDATION WITH HUMAN-LIKE DELAYS ==========
     logger.info(`📱 Validating ${messages.length} phone numbers for session ${sessionId} (SEQUENTIAL MODE)`);
-
     const validationResults = [];
     let validCount = 0;
     let invalidCount = 0;
-
-    // ⚠️ PHASE 1: CRITICAL CHANGE - Sequential validation instead of parallel batches
-    // Old approach: 10 parallel requests every 1s = spike pattern = bot detection
-    // New approach: 1 request per 3-5s = human-like checking = safer
-    
     for (let i = 0; i < messages.length; i++) {
       const message = messages[i];
-      
       try {
-        // Add human-like delay before each check (3-5 seconds)
         if (i > 0) {
-          const randomDelay = 3000 + Math.random() * 2000; // 3-5s
+          const randomDelay = 3000 + Math.random() * 2000; 
           await new Promise(resolve => setTimeout(resolve, randomDelay));
         }
-
         const jid = `${message.phone}@s.whatsapp.net`;
         const onWhatsAppResult = await sock.onWhatsApp(jid);
-        
         const isValid = onWhatsAppResult && onWhatsAppResult.length > 0;
         const result = {
           phone: message.phone,
@@ -104,16 +74,12 @@ const validateSessionPhoneNumbers = async (sessionId, whatsappSessionId, skipVal
           verifiedName: isValid ? onWhatsAppResult[0].verifiedName : null,
           messageIndex: message.messageIndex
         };
-
         if (isValid) {
           validCount++;
         } else {
           invalidCount++;
         }
-
         validationResults.push(result);
-        
-        // Log progress every 5 checks
         if ((i + 1) % 5 === 0) {
           logger.info(`📊 Validation progress: ${i + 1}/${messages.length} (Valid: ${validCount}, Invalid: ${invalidCount})`);
         }
@@ -129,12 +95,8 @@ const validateSessionPhoneNumbers = async (sessionId, whatsappSessionId, skipVal
         });
       }
     }
-    // ========== END PHASE 1 MODIFICATION ==========
-
     const successRate = messages.length > 0 ? (validCount / messages.length) * 100 : 0;
-
     logger.info(`📱 Phone validation completed: ${validCount}/${messages.length} valid (${successRate.toFixed(1)}%)`);
-
     return {
       success: true,
       message: `Phone validation completed: ${validCount}/${messages.length} valid numbers`,
@@ -149,33 +111,21 @@ const validateSessionPhoneNumbers = async (sessionId, whatsappSessionId, skipVal
         "Note: Some numbers may not receive messages. You can proceed with caution." :
         "Good: Most numbers are valid for WhatsApp delivery."
     };
-
   } catch (error) {
     logger.error(`❌ Failed to validate phone numbers for session ${sessionId}:`, error);
     throw error;
   }
 };
-
-/**
- * Helper: Mark invalid phone numbers as failed in database
- * @param {string} sessionId - Session ID
- * @param {Array} validationDetails - Phone validation results
- */
 const markInvalidNumbersAsFailed = async (sessionId, validationDetails) => {
   try {
     const invalidNumbers = validationDetails.filter(item => !item.isValid);
-    
     if (invalidNumbers.length === 0) {
       logger.info(`📱 No invalid numbers found for session ${sessionId}`);
       return;
     }
-
     logger.info(`📱 Marking ${invalidNumbers.length} invalid numbers as failed for session ${sessionId}`);
-    
-    // Update blast_messages table for invalid numbers
     const updatePromises = invalidNumbers.map(async (item) => {
       logger.info(`🔄 Updating phone ${item.phone} to failed status`);
-      
       const updateResult = await BlastMessage.update(
         {
           status: 'failed',
@@ -189,69 +139,50 @@ const markInvalidNumbersAsFailed = async (sessionId, validationDetails) => {
           }
         }
       );
-      
       logger.info(`📝 Update result for ${item.phone}: ${updateResult[0]} rows affected`);
-      
-      // Verify the update
       const verifyRecord = await BlastMessage.findOne({
         where: { sessionId, phone: item.phone }
       });
-      
       if (verifyRecord) {
         logger.info(`✅ Verified ${item.phone} status: ${verifyRecord.status}`);
       } else {
         logger.warn(`⚠️ Could not find record for ${item.phone} after update`);
       }
-      
       return updateResult;
     });
-
     await Promise.all(updatePromises);
-
-    // Update blast session failed count
     await BlastSession.increment(
       { failedCount: invalidNumbers.length },
       { 
         where: { sessionId: sessionId }
       }
     );
-
-    // Recalculate progress using the real-time service for consistency
     const session = await BlastSession.findOne({
       where: { sessionId: sessionId }
     });
-
     if (session) {
       const progressPercentage = blastRealTimeService.calculateProgressPercentage(session);
-
       await BlastSession.update(
         { progressPercentage },
         { where: { sessionId: sessionId } }
       );
-
-      // Emit real-time progress update
       await blastRealTimeService.emitSessionProgress(sessionId, {
         invalidNumbersMarked: invalidNumbers.length,
         reason: 'Invalid phone numbers marked as failed'
       });
     }
-
     logger.info(`📱 Marked ${invalidNumbers.length} invalid numbers as failed for session ${sessionId}`);
-
   } catch (error) {
     logger.error(`❌ Failed to mark invalid numbers as failed for session ${sessionId}:`, error);
     throw error;
   }
 };
-
 const emitSessionUpdate = async (userId = null) => {
   try {
-    // Use the enhanced real-time service for session updates
     await blastRealTimeService.emitSessionsUpdate(userId);
     logger.debug(`📡 Emitted sessions update via real-time service${userId ? ` for user ${userId}` : ' for all users'}`);
   } catch (error) {
     logger.error("❌ Failed to emit session update via real-time service:", error);
-    // Fallback to original implementation if needed
     try {
       if (userId) {
         const userSessions = await BlastSession.findAll({
@@ -265,12 +196,8 @@ const emitSessionUpdate = async (userId = null) => {
           ],
           order: [["createdAt", "DESC"]],
         });
-
-        // Transform whatsappSession to whatsappAccount for frontend compatibility
         const transformedSessions = userSessions.map(session => {
           const sessionData = session.toJSON();
-          
-          // Transform whatsappSession to whatsappAccount
           if (sessionData.whatsappSession) {
             sessionData.whatsappAccount = {
               sessionId: sessionData.whatsappSession.sessionId,
@@ -283,7 +210,6 @@ const emitSessionUpdate = async (userId = null) => {
               operatorInfo: sessionData.whatsappSession.metadata?.operatorInfo || null
             };
           } else {
-            // Fallback untuk missing WhatsApp session data
             sessionData.whatsappAccount = {
               sessionId: sessionData.whatsappSessionId,
               phoneNumber: null,
@@ -295,13 +221,9 @@ const emitSessionUpdate = async (userId = null) => {
               operatorInfo: null
             };
           }
-
-          // Remove the nested whatsappSession object
           delete sessionData.whatsappSession;
-          
           return sessionData;
         });
-
         getSocket().to(`user_${userId}`).emit("sessions-update", transformedSessions);
       } else {
         const allUsers = await BlastSession.findAll({
@@ -309,7 +231,6 @@ const emitSessionUpdate = async (userId = null) => {
           group: ['userId'],
           raw: true
         });
-        
         for (const userObj of allUsers) {
           const userSessions = await BlastSession.findAll({
             where: { userId: userObj.userId },
@@ -322,12 +243,8 @@ const emitSessionUpdate = async (userId = null) => {
             ],
             order: [["createdAt", "DESC"]],
           });
-
-          // Transform whatsappSession to whatsappAccount for frontend compatibility
           const transformedSessions = userSessions.map(session => {
             const sessionData = session.toJSON();
-            
-            // Transform whatsappSession to whatsappAccount
             if (sessionData.whatsappSession) {
               sessionData.whatsappAccount = {
                 sessionId: sessionData.whatsappSession.sessionId,
@@ -340,7 +257,6 @@ const emitSessionUpdate = async (userId = null) => {
                 operatorInfo: sessionData.whatsappSession.metadata?.operatorInfo || null
               };
             } else {
-              // Fallback untuk missing WhatsApp session data
               sessionData.whatsappAccount = {
                 sessionId: sessionData.whatsappSessionId,
                 phoneNumber: null,
@@ -352,13 +268,9 @@ const emitSessionUpdate = async (userId = null) => {
                 operatorInfo: null
               };
             }
-
-            // Remove the nested whatsappSession object
             delete sessionData.whatsappSession;
-            
             return sessionData;
           });
-
           getSocket().to(`user_${userObj.userId}`).emit("sessions-update", transformedSessions);
         }
       }
@@ -367,22 +279,10 @@ const emitSessionUpdate = async (userId = null) => {
     }
   }
 };
-
-/**
- * Blast Control Controller
- * Handles all blast session control operations
- */
-
-/**
- * Parse Excel file and convert to messageList format
- * Reuses logic from excelService.js for consistency
- */
 const parseExcelToMessageList = (filePath, selectTarget = null, inputNumbers = null) => {
   try {
     let rows = [];
-    
     if (selectTarget === "input" && inputNumbers) {
-      // Parse manual input (like in excelService.js)
       rows = inputNumbers
         .split("\n")
         .map((line) => line.trim())
@@ -394,13 +294,10 @@ const parseExcelToMessageList = (filePath, selectTarget = null, inputNumbers = n
           return row;
         });
     } else {
-      // Parse Excel file (like in excelService.js)
       const workbook = xlsx.readFile(filePath);
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       rows = xlsx.utils.sheet_to_json(sheet);
     }
-
-    // Convert to Enhanced Blast messageList format
     const messageList = rows.map((row) => ({
       phone: String(row["no"] || row["phone"] || "").replace(/\D/g, ""),
       contactName: row["name"] || row["contactName"] || undefined,
@@ -409,7 +306,6 @@ const parseExcelToMessageList = (filePath, selectTarget = null, inputNumbers = n
         company: row["company"] || "",
         custom1: row["custom1"] || "",
         custom2: row["custom2"] || "",
-        // Add any other columns as variables
         ...Object.keys(row).reduce((vars, key) => {
           if (!["no", "phone", "name", "contactName"].includes(key)) {
             vars[key] = row[key] || "";
@@ -417,8 +313,7 @@ const parseExcelToMessageList = (filePath, selectTarget = null, inputNumbers = n
           return vars;
         }, {})
       }
-    })).filter(item => item.phone.length > 0); // Filter out entries without phone numbers
-
+    })).filter(item => item.phone.length > 0); 
     logger.info(`📊 Parsed Excel: ${messageList.length} valid contacts from ${rows.length} rows`);
     return messageList;
   } catch (error) {
@@ -426,11 +321,6 @@ const parseExcelToMessageList = (filePath, selectTarget = null, inputNumbers = n
     throw new AppError(`Failed to parse Excel file: ${error.message}`, 400);
   }
 };
-
-/**
- * Create new blast session
- * Supports both messageList array and Excel file upload
- */
 const createBlastSession = async (req, res) => {
   let {
     whatsappSessionId,
@@ -441,10 +331,7 @@ const createBlastSession = async (req, res) => {
     selectTarget,
     inputNumbers,
   } = req.body;
-
-  const filePath = req.file?.path; // Excel file path from multer
-
-  // ✨ FIX: Parse config if it's a JSON string (from FormData)
+  const filePath = req.file?.path; 
   if (typeof config === 'string') {
     try {
       config = JSON.parse(config);
@@ -454,37 +341,27 @@ const createBlastSession = async (req, res) => {
       throw new AppError('Invalid config format', 400);
     }
   }
-
-  // ✨ FIX: Parse messageList if it's a JSON string (from FormData)
   if (typeof messageList === 'string') {
     try {
       messageList = JSON.parse(messageList);
       logger.info('✅ MessageList parsed from JSON string');
     } catch (error) {
       logger.error('❌ Failed to parse messageList JSON:', error);
-      // Don't throw error here, as messageList might come from file
       messageList = null;
     }
   }
-
-  // Basic validation
   if (!whatsappSessionId || !messageTemplate) {
     throw new AppError(
       "Missing required fields: whatsappSessionId, messageTemplate",
       400
     );
   }
-
   let finalMessageList = [];
-
   try {
-    // Determine data source and parse accordingly
     if (messageList && Array.isArray(messageList) && messageList.length > 0) {
-      // Method 1: Direct messageList array (from Enhanced Creator frontend parsing)
       finalMessageList = messageList;
       logger.info(`📝 Using provided messageList: ${messageList.length} contacts`);
     } else if (filePath || (selectTarget === "input" && inputNumbers)) {
-      // Method 2: Excel file upload or manual input (like legacy blast)
       finalMessageList = parseExcelToMessageList(filePath, selectTarget, inputNumbers);
       logger.info(`📊 Parsed from file/input: ${finalMessageList.length} contacts`);
     } else {
@@ -493,12 +370,9 @@ const createBlastSession = async (req, res) => {
         400
       );
     }
-
     if (finalMessageList.length === 0) {
       throw new AppError("No valid contacts found", 400);
     }
-
-    // Create blast session
     const result = await blastSessionManager.createSession({
       userId: req.user.id,
       whatsappSessionId,
@@ -507,14 +381,10 @@ const createBlastSession = async (req, res) => {
       messageList: finalMessageList,
       config,
     });
-
     logger.info(
       `✅ Blast session created by user ${req.user.id}: ${result.sessionId} with ${finalMessageList.length} messages`
     );
-
-    // Emit session update to user
     await emitSessionUpdate(req.user.id);
-
     res.status(201).json({
       success: true,
       message: "Blast session created successfully",
@@ -531,7 +401,6 @@ const createBlastSession = async (req, res) => {
     );
     throw new AppError(`Failed to create blast session: ${error.message}`, 500);
   } finally {
-    // Cleanup temporary Excel file if it exists
     if (filePath) {
       try {
         if (fs.existsSync(filePath)) {
@@ -544,28 +413,16 @@ const createBlastSession = async (req, res) => {
     }
   }
 };
-
-/**
- * Start blast session
- */
 const startBlastSession = async (req, res) => {
   const { sessionId } = req.params;
-  const { skipPhoneValidation = false } = req.body; // Optional parameter
-
+  const { skipPhoneValidation = false } = req.body; 
   try {
-    // Verify session ownership
     const session = await BlastSession.findOne({
       where: { sessionId, userId: req.user.id },
     });
-
     if (!session) {
       throw new AppError("Blast session not found or access denied", 404);
     }
-
-    // � PHASE 1 FIX: DISABLE PRE-VALIDATION TO PREVENT DOUBLE API CALLS
-    // Pre-validation removed to eliminate bulk checking pattern
-    // Validation will be done in execution service (real-time, per message)
-    // This reduces API calls by 50% and removes automation signature
     let phoneValidationResult = {
       success: true,
       message: "Pre-validation disabled (Phase 1 fix - prevents double API calls and bulk checking pattern)",
@@ -575,40 +432,26 @@ const startBlastSession = async (req, res) => {
       details: [],
       note: "Validation will be performed in execution service during actual send"
     };
-    
     logger.info(`🚨 PHASE 1 FIX: Pre-validation disabled for session ${sessionId} to prevent ban-triggering patterns`);
-    
       logger.info(`Attempting to emit notification for session ${sessionId} due to business hours.`);
-      // getSocket().to(`user_${req.user.id}`).emit("notification", {
-      //   type: "warning",
-      //   message: `Blast session ${sessionId} will be paused until business hours (${businessHoursConfig.startHour}:00 - ${businessHoursConfig.endHour}:00).`,
-      // });
       logger.info(
         `⏰ Notification emitted for session ${sessionId}: Blast session will be paused due to business hours.`
       );
-
-    // Start session
     const result = await blastSessionManager.startSession(sessionId);
-
     logger.info(
       `▶️ Blast session started by user ${req.user.id}: ${sessionId}`
     );
-
-    // Emit session update to user
     await emitSessionUpdate(req.user.id);
-
-    // Prepare success message based on phone validation results
     let successMessage = "Blast session started successfully";
     if (phoneValidationResult && phoneValidationResult.invalidNumbers > 0) {
       successMessage = `Blast session started. ${phoneValidationResult.validNumbers}/${phoneValidationResult.totalMessages} numbers are valid. ${phoneValidationResult.invalidNumbers} invalid numbers marked as failed.`;
     }
-
     res.json({
       success: true,
       message: successMessage,
       data: {
-        ...result, // Include existing result data
-        phoneValidation: phoneValidationResult, // Include phone validation results
+        ...result, 
+        phoneValidation: phoneValidationResult, 
       },
     });
   } catch (error) {
@@ -620,31 +463,18 @@ const startBlastSession = async (req, res) => {
     throw new AppError(`Failed to start blast session: ${error.message}`, 500);
   }
 };
-
-/**
- * Pause blast session
- */
 const pauseBlastSession = async (req, res) => {
   const { sessionId } = req.params;
-
   try {
-    // Verify session ownership
     const session = await BlastSession.findOne({
       where: { sessionId, userId: req.user.id },
     });
-
     if (!session) {
       throw new AppError("Blast session not found or access denied", 404);
     }
-
-    // Pause session
     const result = await blastSessionManager.pauseSession(sessionId);
-
     logger.info(`⏸️ Blast session paused by user ${req.user.id}: ${sessionId}`);
-
-    // Emit session update to user
     await emitSessionUpdate(req.user.id);
-
     res.json({
       success: true,
       message: "Blast session paused successfully",
@@ -655,28 +485,16 @@ const pauseBlastSession = async (req, res) => {
     throw new AppError(`Failed to pause blast session: ${error.message}`, 500);
   }
 };
-
-/**
- * Resume blast session
- */
 const resumeBlastSession = async (req, res) => {
   const { sessionId } = req.params;
-  const { skipPhoneValidation = false } = req.body; // Optional parameter
-
+  const { skipPhoneValidation = false } = req.body; 
   try {
-    // Verify session ownership
     const session = await BlastSession.findOne({
       where: { sessionId, userId: req.user.id },
     });
-
     if (!session) {
       throw new AppError("Blast session not found or access denied", 404);
     }
-
-    // � PHASE 1 FIX: DISABLE PRE-VALIDATION TO PREVENT DOUBLE API CALLS
-    // Pre-validation removed to eliminate bulk checking pattern (consistent with startBlastSession)
-    // Validation will be done in execution service (real-time, per message)
-    // This reduces API calls by 50% and removes automation signature
     let phoneValidationResult = {
       success: true,
       message: "Pre-validation disabled (Phase 1 fix - prevents double API calls and bulk checking pattern)",
@@ -686,31 +504,22 @@ const resumeBlastSession = async (req, res) => {
       details: [],
       note: "Validation will be performed in execution service during actual send"
     };
-    
     logger.info(`🚨 PHASE 1 FIX: Pre-validation disabled for resume session ${sessionId} to prevent ban-triggering patterns`);
-
-    // Resume session
     const result = await blastSessionManager.resumeSession(sessionId);
-
     logger.info(
       `▶️ Blast session resumed by user ${req.user.id}: ${sessionId}`
     );
-
-    // Emit session update to user
     await emitSessionUpdate(req.user.id);
-
-    // Prepare success message based on phone validation results
     let successMessage = "Blast session resumed successfully";
     if (phoneValidationResult && phoneValidationResult.invalidNumbers > 0) {
       successMessage = `Blast session resumed. ${phoneValidationResult.validNumbers}/${phoneValidationResult.totalMessages} pending numbers are valid. ${phoneValidationResult.invalidNumbers} invalid numbers marked as failed.`;
     }
-
     res.json({
       success: true,
       message: successMessage,
       data: {
         ...result,
-        phoneValidation: phoneValidationResult, // Include phone validation results
+        phoneValidation: phoneValidationResult, 
       },
     });
   } catch (error) {
@@ -718,33 +527,20 @@ const resumeBlastSession = async (req, res) => {
     throw new AppError(`Failed to resume blast session: ${error.message}`, 500);
   }
 };
-
-/**
- * Stop blast session
- */
 const stopBlastSession = async (req, res) => {
   const { sessionId } = req.params;
-
   try {
-    // Verify session ownership
     const session = await BlastSession.findOne({
       where: { sessionId, userId: req.user.id },
     });
-
     if (!session) {
       throw new AppError("Blast session not found or access denied", 404);
     }
-
-    // Stop session
     const result = await blastSessionManager.stopSession(sessionId);
-
     logger.info(
       `⏹️ Blast session stopped by user ${req.user.id}: ${sessionId}`
     );
-
-    // Emit session update to user
     await emitSessionUpdate(req.user.id);
-
     res.json({
       success: true,
       message: "Blast session stopped successfully",
@@ -755,26 +551,16 @@ const stopBlastSession = async (req, res) => {
     throw new AppError(`Failed to stop blast session: ${error.message}`, 500);
   }
 };
-
-/**
- * Get blast session status
- */
 const getBlastStatus = async (req, res) => {
   const { sessionId } = req.params;
-
   try {
-    // Verify session ownership
     const session = await BlastSession.findOne({
       where: { sessionId, userId: req.user.id },
     });
-
     if (!session) {
       throw new AppError("Blast session not found or access denied", 404);
     }
-
-    // Get status
     const status = await blastSessionManager.getSessionStatus(sessionId);
-
     res.json({
       success: true,
       data: status,
@@ -784,26 +570,16 @@ const getBlastStatus = async (req, res) => {
     throw new AppError(`Failed to get blast status: ${error.message}`, 500);
   }
 };
-
-/**
- * Get blast session progress
- */
 const getBlastProgress = async (req, res) => {
   const { sessionId } = req.params;
-
   try {
-    // Verify session ownership
     const session = await BlastSession.findOne({
       where: { sessionId, userId: req.user.id },
     });
-
     if (!session) {
       throw new AppError("Blast session not found or access denied", 404);
     }
-
-    // Get progress
     const status = await blastSessionManager.getSessionStatus(sessionId);
-
     res.json({
       success: true,
       data: {
@@ -818,23 +594,14 @@ const getBlastProgress = async (req, res) => {
     throw new AppError(`Failed to get blast progress: ${error.message}`, 500);
   }
 };
-
-/**
- * Get user's blast sessions
- */
 const getUserBlastSessions = async (req, res) => {
   const { status, limit = 50, offset = 0 } = req.query;
-
   try {
     const whereClause = { userId: req.user.id };
-
     if (status) {
       whereClause.status = status;
     }
-
-    // Import Session model untuk include
     const Session = require("../models/sessionModel");
-
     const { count, rows: sessions } = await BlastSession.findAndCountAll({
       where: whereClause,
       include: [{
@@ -850,25 +617,17 @@ const getUserBlastSessions = async (req, res) => {
           'connectionQuality',
           'metadata'
         ],
-        required: false // LEFT JOIN untuk handle missing WhatsApp sessions
+        required: false 
       }],
       order: [["createdAt", "DESC"]],
       limit: parseInt(limit),
       offset: parseInt(offset),
     });
-
-    // Transform data untuk include WhatsApp account information and next message info
     const transformedSessions = await Promise.all(sessions.map(async (session) => {
       const sessionData = session.toJSON();
-      
-      // ✨ APPLY RUNTIME CONFIG: Merge user config dengan default config untuk response
       sessionData.fullConfig = blastSessionManager.applyRuntimeConfig(sessionData.config);
-      // Keep original user config for reference
       sessionData.userConfig = sessionData.config;
-      // Replace config dengan fullConfig untuk backward compatibility
       sessionData.config = sessionData.fullConfig;
-      
-      // Extract WhatsApp account information
       if (sessionData.whatsappSession) {
         sessionData.whatsappAccount = {
           sessionId: sessionData.whatsappSession.sessionId,
@@ -881,7 +640,6 @@ const getUserBlastSessions = async (req, res) => {
           operatorInfo: sessionData.whatsappSession.metadata?.operatorInfo || null
         };
       } else {
-        // Fallback untuk missing WhatsApp session data
         sessionData.whatsappAccount = {
           sessionId: sessionData.whatsappSessionId,
           phoneNumber: null,
@@ -893,8 +651,6 @@ const getUserBlastSessions = async (req, res) => {
           operatorInfo: null
         };
       }
-
-      // ⏱️ Get next message timing info for RUNNING sessions
       if (sessionData.status === 'RUNNING') {
         try {
           const nextMessageInfo = await blastExecutionService.getNextMessageInfo(sessionData.sessionId);
@@ -907,13 +663,9 @@ const getUserBlastSessions = async (req, res) => {
       } else {
         sessionData.nextMessageInfo = null;
       }
-
-      // Remove the nested whatsappSession object
       delete sessionData.whatsappSession;
-      
       return sessionData;
     }));
-
     res.json({
       success: true,
       data: {
@@ -934,37 +686,26 @@ const getUserBlastSessions = async (req, res) => {
     throw new AppError(`Failed to get blast sessions: ${error.message}`, 500);
   }
 };
-
-/**
- * Get session messages
- */
 const getSessionMessages = async (req, res) => {
   const { sessionId } = req.params;
   const { status, limit = 100, offset = 0 } = req.query;
-
   try {
-    // Verify session ownership
     const session = await BlastSession.findOne({
       where: { sessionId, userId: req.user.id },
     });
-
     if (!session) {
       throw new AppError("Blast session not found or access denied", 404);
     }
-
     const whereClause = { sessionId };
-
     if (status) {
       whereClause.status = status;
     }
-
     const { count, rows: messages } = await BlastMessage.findAndCountAll({
       where: whereClause,
       order: [["messageIndex", "ASC"]],
       limit: parseInt(limit),
       offset: parseInt(offset),
     });
-
     res.json({
       success: true,
       data: {
@@ -982,30 +723,19 @@ const getSessionMessages = async (req, res) => {
     throw new AppError(`Failed to get session messages: ${error.message}`, 500);
   }
 };
-
-/**
- * Retry failed messages
- */
 const retryFailedMessages = async (req, res) => {
   const { sessionId } = req.params;
-
   try {
-    // Verify session ownership
     const session = await BlastSession.findOne({
       where: { sessionId, userId: req.user.id },
     });
-
     if (!session) {
       throw new AppError("Blast session not found or access denied", 404);
     }
-
-    // Reset failed messages for retry
     const resetCount = await messageQueueHandler.resetFailedMessages(sessionId);
-
     logger.info(
       `🔄 Reset ${resetCount} failed messages for retry in session ${sessionId}`
     );
-
     res.json({
       success: true,
       message: `${resetCount} failed messages reset for retry`,
@@ -1019,18 +749,12 @@ const retryFailedMessages = async (req, res) => {
     );
   }
 };
-
-/**
- * Recover active sessions
- */
 const recoverActiveSessions = async (req, res) => {
   try {
     const result = await sessionPersistence.recoverSessions(req.user.id);
-
     logger.info(
       `🔄 Recovered sessions for user ${req.user.id}: ${result.recoveredSessions.length}`
     );
-
     res.json({
       success: true,
       message: `Recovered ${result.recoveredSessions.length} active sessions`,
@@ -1044,45 +768,30 @@ const recoverActiveSessions = async (req, res) => {
     throw new AppError(`Failed to recover sessions: ${error.message}`, 500);
   }
 };
-
-/**
- * Cleanup session
- */
 const cleanupSession = async (req, res) => {
   const { sessionId } = req.params;
-
   try {
-    // Verify session ownership
     const session = await BlastSession.findOne({
       where: { sessionId, userId: req.user.id },
     });
-
     if (!session) {
       throw new AppError("Blast session not found or access denied", 404);
     }
-
-    // Only allow cleanup of completed/stopped sessions
     if (!["COMPLETED", "STOPPED", "ERROR"].includes(session.status)) {
       throw new AppError(
         "Can only cleanup completed, stopped, or error sessions",
         400
       );
     }
-
-    // Delete messages first
     const deletedMessages = await BlastMessage.destroy({
       where: { sessionId },
     });
-
-    // Delete session
     await BlastSession.destroy({
       where: { sessionId },
     });
-
     logger.info(
       `🗑️ Cleaned up session ${sessionId}: ${deletedMessages} messages deleted`
     );
-
     res.json({
       success: true,
       message: "Session cleaned up successfully",
@@ -1093,19 +802,13 @@ const cleanupSession = async (req, res) => {
     throw new AppError(`Failed to cleanup session: ${error.message}`, 500);
   }
 };
-
-/**
- * Get system health
- */
 const getSystemHealth = async (req, res) => {
   try {
     const activeSessions = blastSessionManager.getActiveSessions();
-
     const totalSessions = await BlastSession.count();
     const activeDatabaseSessions = await BlastSession.count({
       where: { status: ["RUNNING", "PAUSED"] },
     });
-
     const health = {
       status: "healthy",
       activeSessions: activeSessions.length,
@@ -1114,7 +817,6 @@ const getSystemHealth = async (req, res) => {
       memoryUsage: process.memoryUsage(),
       uptime: process.uptime(),
     };
-
     res.json({
       success: true,
       data: health,
@@ -1124,26 +826,16 @@ const getSystemHealth = async (req, res) => {
     throw new AppError(`Failed to get system health: ${error.message}`, 500);
   }
 };
-
-/**
- * Get session statistics
- */
 const getSessionStats = async (req, res) => {
   const { sessionId } = req.params;
-
   try {
-    // Verify session ownership
     const session = await BlastSession.findOne({
       where: { sessionId, userId: req.user.id },
     });
-
     if (!session) {
       throw new AppError("Blast session not found or access denied", 404);
     }
-
-    // Get queue statistics
     const stats = await messageQueueHandler.getQueueStats(sessionId);
-
     res.json({
       success: true,
       data: {
@@ -1163,28 +855,16 @@ const getSessionStats = async (req, res) => {
     throw new AppError(`Failed to get session stats: ${error.message}`, 500);
   }
 };
-
-/**
- * Force start blast session (bypasses health checks)
- */
 const forceStartBlastSession = async (req, res) => {
   const { sessionId } = req.params;
-  const { skipPhoneValidation = false } = req.body; // Optional parameter
-
+  const { skipPhoneValidation = false } = req.body; 
   try {
-    // Verify session ownership
     const session = await BlastSession.findOne({
       where: { sessionId, userId: req.user.id },
     });
-
     if (!session) {
       throw new AppError("Blast session not found or access denied", 404);
     }
-
-    // � PHASE 1 FIX: DISABLE PRE-VALIDATION TO PREVENT DOUBLE API CALLS
-    // Pre-validation removed even for force-start to eliminate bulk checking pattern
-    // Validation will be done in execution service (real-time, per message)
-    // This reduces API calls by 50% and removes automation signature
     let phoneValidationResult = {
       success: true,
       message: "Pre-validation disabled (Phase 1 fix - prevents double API calls and bulk checking pattern)",
@@ -1194,17 +874,12 @@ const forceStartBlastSession = async (req, res) => {
       details: [],
       note: "Validation will be performed in execution service during actual send"
     };
-    
     logger.info(`🚨 PHASE 1 FIX: Pre-validation disabled for force-start session ${sessionId} to prevent ban-triggering patterns`);
-
-    // Check business hours first (unless forced)
     const businessHoursConfig = session.config?.businessHours;
     logger.info(`[forceStartBlastSession] Session ${sessionId} businessHoursConfig: ${JSON.stringify(businessHoursConfig)}`);
     const isWithinHours = blastExecutionService.isWithinBusinessHours(businessHoursConfig);
     logger.info(`[forceStartBlastSession] Session ${sessionId} isWithinBusinessHours: ${isWithinHours}`);
-
-    let isPausedDueToBusinessHours = false; // Initialize flag
-
+    let isPausedDueToBusinessHours = false; 
     if (
       businessHoursConfig &&
       businessHoursConfig.enabled &&
@@ -1218,33 +893,25 @@ const forceStartBlastSession = async (req, res) => {
       logger.info(
         `⏰ Notification emitted for force-start session ${sessionId}: Blast session will be paused due to business hours.`
       );
-      isPausedDueToBusinessHours = true; // Set flag if condition met
+      isPausedDueToBusinessHours = true; 
     }
-
-    // Force start session (bypasses health checks)
-    const result = await blastSessionManager.startSession(sessionId, true); // true = forceStart
-
+    const result = await blastSessionManager.startSession(sessionId, true); 
     logger.info(
       `🚀 Blast session force-started by user ${req.user.id}: ${sessionId}`
     );
-
-    // Emit session update to user
     await emitSessionUpdate(req.user.id);
-
-    // Prepare success message based on phone validation results
     let successMessage = "Blast session force-started successfully (health checks bypassed)";
     if (phoneValidationResult && phoneValidationResult.invalidNumbers > 0) {
       successMessage = `Blast session force-started. ${phoneValidationResult.validNumbers}/${phoneValidationResult.totalMessages} numbers are valid. ${phoneValidationResult.invalidNumbers} invalid numbers marked as failed.`;
     }
-
     res.json({
       success: true,
       message: successMessage,
       data: {
-        ...result, // Include existing result data
-        isPausedDueToBusinessHours: isPausedDueToBusinessHours, // Add the new flag
-        phoneValidation: phoneValidationResult, // Include phone validation results
-        forceStarted: true, // Indicate this was a force start
+        ...result, 
+        isPausedDueToBusinessHours: isPausedDueToBusinessHours, 
+        phoneValidation: phoneValidationResult, 
+        forceStarted: true, 
       },
     });
   } catch (error) {
@@ -1256,11 +923,9 @@ const forceStartBlastSession = async (req, res) => {
     throw new AppError(`Failed to force-start blast session: ${error.message}`, 500);
   }
 };
-
 const handleSessionAction = async (req, res) => {
   const { sessionId } = req.params;
   const { action } = req.body;
-
   switch (action) {
     case "start":
       return startBlastSession(req, res);
@@ -1272,40 +937,29 @@ const handleSessionAction = async (req, res) => {
       return resumeBlastSession(req, res);
     case "stop":
       return stopBlastSession(req, res);
-    case "validate-phones": // New action for phone validation
+    case "validate-phones": 
       return validateSessionPhones(req, res);
     default:
       throw new AppError(`Invalid action: ${action}`, 400);
   }
 };
-
-/**
- * Validate phone numbers for a session (manual validation)
- */
 const validateSessionPhones = async (req, res) => {
   const { sessionId } = req.params;
-
   try {
-    // Verify session ownership
     const session = await BlastSession.findOne({
       where: { sessionId, userId: req.user.id },
     });
-
     if (!session) {
       throw new AppError("Blast session not found or access denied", 404);
     }
-
-    // Validate phone numbers
     const phoneValidationResult = await validateSessionPhoneNumbers(
       sessionId, 
       session.whatsappSessionId, 
-      false // Never skip validation for manual check
+      false 
     );
-
     logger.info(
       `📱 Manual phone validation completed for session ${sessionId} by user ${req.user.id}`
     );
-
     res.json({
       success: true,
       message: "Phone numbers validation completed",
@@ -1316,28 +970,16 @@ const validateSessionPhones = async (req, res) => {
     throw new AppError(`Failed to validate phone numbers: ${error.message}`, 500);
   }
 };
-
-// =============================================================================
-// PHASE 3 - ADVANCED FEATURES ENDPOINTS
-// =============================================================================
-
-/**
- * Validate phone numbers (batch)
- */
 const validatePhoneNumbers = async (req, res) => {
   const { phoneNumbers, options = {} } = req.body;
-
   try {
     if (!phoneNumbers || !Array.isArray(phoneNumbers)) {
       throw new AppError("Phone numbers array is required", 400);
     }
-
     if (phoneNumbers.length > 10000) {
       throw new AppError("Maximum 10,000 phone numbers allowed per batch", 400);
     }
-
     const validationResult = await PhoneValidationService.validateBatch(phoneNumbers, options);
-
     res.json({
       success: true,
       data: validationResult,
@@ -1347,20 +989,13 @@ const validatePhoneNumbers = async (req, res) => {
     throw new AppError(`Failed to validate phone numbers: ${error.message}`, 500);
   }
 };
-
-/**
- * Validate single phone number
- */
 const validateSinglePhone = async (req, res) => {
   const { phoneNumber, options = {} } = req.body;
-
   try {
     if (!phoneNumber) {
       throw new AppError("Phone number is required", 400);
     }
-
     const validationResult = await PhoneValidationService.validateSingle(phoneNumber, options);
-
     res.json({
       success: true,
       data: validationResult,
@@ -1370,24 +1005,16 @@ const validateSinglePhone = async (req, res) => {
     throw new AppError(`Failed to validate phone number: ${error.message}`, 500);
   }
 };
-
-/**
- * Export phone validation results
- */
 const exportPhoneValidation = async (req, res) => {
   const { phoneNumbers, format = 'csv' } = req.body;
-
   try {
     if (!phoneNumbers || !Array.isArray(phoneNumbers)) {
       throw new AppError("Phone numbers array is required", 400);
     }
-
     const validationResult = await PhoneValidationService.validateBatch(phoneNumbers, {
       returnDetails: true
     });
-
     const exportResult = await PhoneValidationService.exportValidationResults(validationResult, format);
-
     if (format === 'csv') {
       res.setHeader('Content-Type', 'text/csv');
       res.setHeader('Content-Disposition', 'attachment; filename="phone_validation.csv"');
@@ -1403,19 +1030,12 @@ const exportPhoneValidation = async (req, res) => {
     throw new AppError(`Failed to export phone validation: ${error.message}`, 500);
   }
 };
-
-/**
- * Configure auto retry for a session
- */
 const configureAutoRetry = async (req, res) => {
   const { sessionId } = req.params;
   const retryConfig = req.body;
-
   try {
     const result = await AutoRetryService.enableAutoRetry(sessionId, retryConfig, req.user.id);
-
     logger.info(`✅ Auto retry configured for session ${sessionId} by user ${req.user.id}`);
-
     res.json({
       success: true,
       message: "Auto retry configured successfully",
@@ -1426,18 +1046,11 @@ const configureAutoRetry = async (req, res) => {
     throw new AppError(`Failed to configure auto retry: ${error.message}`, 500);
   }
 };
-
-/**
- * Disable auto retry for a session
- */
 const disableAutoRetry = async (req, res) => {
   const { sessionId } = req.params;
-
   try {
     const result = await AutoRetryService.disableAutoRetry(sessionId, req.user.id);
-
     logger.info(`🛑 Auto retry disabled for session ${sessionId} by user ${req.user.id}`);
-
     res.json({
       success: true,
       message: "Auto retry disabled successfully",
@@ -1448,16 +1061,10 @@ const disableAutoRetry = async (req, res) => {
     throw new AppError(`Failed to disable auto retry: ${error.message}`, 500);
   }
 };
-
-/**
- * Get auto retry status for a session
- */
 const getAutoRetryStatus = async (req, res) => {
   const { sessionId } = req.params;
-
   try {
     const status = await AutoRetryService.getRetryStatus(sessionId, req.user.id);
-
     res.json({
       success: true,
       data: status,
@@ -1467,17 +1074,11 @@ const getAutoRetryStatus = async (req, res) => {
     throw new AppError(`Failed to get auto retry status: ${error.message}`, 500);
   }
 };
-
-/**
- * Pause auto retry for a session
- */
 const pauseAutoRetry = async (req, res) => {
   const { sessionId } = req.params;
   const { durationMinutes = 60 } = req.body;
-
   try {
     const result = await AutoRetryService.pauseRetries(sessionId, req.user.id, durationMinutes);
-
     res.json({
       success: true,
       message: `Auto retry paused for ${durationMinutes} minutes`,
@@ -1488,16 +1089,10 @@ const pauseAutoRetry = async (req, res) => {
     throw new AppError(`Failed to pause auto retry: ${error.message}`, 500);
   }
 };
-
-/**
- * Resume auto retry for a session
- */
 const resumeAutoRetry = async (req, res) => {
   const { sessionId } = req.params;
-
   try {
     const result = await AutoRetryService.resumeRetries(sessionId, req.user.id);
-
     res.json({
       success: true,
       message: "Auto retry resumed",
@@ -1508,20 +1103,13 @@ const resumeAutoRetry = async (req, res) => {
     throw new AppError(`Failed to resume auto retry: ${error.message}`, 500);
   }
 };
-
-/**
- * Force retry specific messages
- */
 const forceRetryMessages = async (req, res) => {
   const { messageIds } = req.body;
-
   try {
     if (!messageIds || !Array.isArray(messageIds)) {
       throw new AppError("Message IDs array is required", 400);
     }
-
     const result = await AutoRetryService.forceRetryMessages(messageIds, req.user.id);
-
     res.json({
       success: true,
       message: `${result.length} messages queued for retry`,
@@ -1532,26 +1120,17 @@ const forceRetryMessages = async (req, res) => {
     throw new AppError(`Failed to force retry messages: ${error.message}`, 500);
   }
 };
-
-/**
- * Bulk retry failed messages across multiple sessions
- */
 const bulkRetryFailedMessages = async (req, res) => {
   const { sessionIds, options = {} } = req.body;
-
   try {
     if (!sessionIds || !Array.isArray(sessionIds)) {
       throw new AppError("Session IDs array is required", 400);
     }
-
     if (sessionIds.length > 50) {
       throw new AppError("Maximum 50 sessions allowed per bulk operation", 400);
     }
-
     const result = await BulkOperationsService.bulkRetryFailedMessages(sessionIds, req.user.id, options);
-
     logger.info(`🔄 Bulk retry completed for ${sessionIds.length} sessions by user ${req.user.id}`);
-
     res.json({
       success: true,
       message: `Bulk retry completed for ${result.processedSessions} sessions`,
@@ -1562,28 +1141,19 @@ const bulkRetryFailedMessages = async (req, res) => {
     throw new AppError(`Failed to perform bulk retry: ${error.message}`, 500);
   }
 };
-
-/**
- * Bulk update message status
- */
 const bulkUpdateMessageStatus = async (req, res) => {
   const { messageIds, newStatus } = req.body;
-
   try {
     if (!messageIds || !Array.isArray(messageIds)) {
       throw new AppError("Message IDs array is required", 400);
     }
-
     if (!newStatus) {
       throw new AppError("New status is required", 400);
     }
-
     if (messageIds.length > 1000) {
       throw new AppError("Maximum 1000 messages allowed per bulk update", 400);
     }
-
     const result = await BulkOperationsService.bulkUpdateMessageStatus(messageIds, newStatus, req.user.id);
-
     res.json({
       success: true,
       message: `${result.updatedCount} messages updated`,
@@ -1594,24 +1164,16 @@ const bulkUpdateMessageStatus = async (req, res) => {
     throw new AppError(`Failed to bulk update message status: ${error.message}`, 500);
   }
 };
-
-/**
- * Bulk delete messages
- */
 const bulkDeleteMessages = async (req, res) => {
   const { messageIds } = req.body;
-
   try {
     if (!messageIds || !Array.isArray(messageIds)) {
       throw new AppError("Message IDs array is required", 400);
     }
-
     if (messageIds.length > 1000) {
       throw new AppError("Maximum 1000 messages allowed per bulk delete", 400);
     }
-
     const result = await BulkOperationsService.bulkDeleteMessages(messageIds, req.user.id);
-
     res.json({
       success: true,
       message: `${result.deletedCount} messages deleted`,
@@ -1622,24 +1184,16 @@ const bulkDeleteMessages = async (req, res) => {
     throw new AppError(`Failed to bulk delete messages: ${error.message}`, 500);
   }
 };
-
-/**
- * Bulk validate phone numbers
- */
 const bulkValidatePhoneNumbers = async (req, res) => {
   const { phoneNumbers, options = {} } = req.body;
-
   try {
     if (!phoneNumbers || !Array.isArray(phoneNumbers)) {
       throw new AppError("Phone numbers array is required", 400);
     }
-
     if (phoneNumbers.length > 10000) {
       throw new AppError("Maximum 10,000 phone numbers allowed per batch", 400);
     }
-
     const result = await BulkOperationsService.bulkValidatePhoneNumbers(phoneNumbers, options);
-
     res.json({
       success: true,
       data: result,
@@ -1649,28 +1203,19 @@ const bulkValidatePhoneNumbers = async (req, res) => {
     throw new AppError(`Failed to bulk validate phone numbers: ${error.message}`, 500);
   }
 };
-
-/**
- * Bulk pause/resume campaigns
- */
 const bulkCampaignControl = async (req, res) => {
   const { sessionIds, action } = req.body;
-
   try {
     if (!sessionIds || !Array.isArray(sessionIds)) {
       throw new AppError("Session IDs array is required", 400);
     }
-
     if (!action || !['pause', 'resume'].includes(action)) {
       throw new AppError("Action must be 'pause' or 'resume'", 400);
     }
-
     if (sessionIds.length > 50) {
       throw new AppError("Maximum 50 sessions allowed per bulk operation", 400);
     }
-
     const result = await BulkOperationsService.bulkCampaignControl(sessionIds, action, req.user.id);
-
     res.json({
       success: true,
       message: `Bulk ${action} completed for ${result.successfulOperations} sessions`,
@@ -1681,24 +1226,16 @@ const bulkCampaignControl = async (req, res) => {
     throw new AppError(`Failed to perform bulk campaign control: ${error.message}`, 500);
   }
 };
-
-/**
- * Bulk export campaign data
- */
 const bulkExportCampaignData = async (req, res) => {
   const { sessionIds, options = {} } = req.body;
-
   try {
     if (!sessionIds || !Array.isArray(sessionIds)) {
       throw new AppError("Session IDs array is required", 400);
     }
-
     if (sessionIds.length > 20) {
       throw new AppError("Maximum 20 sessions allowed per bulk export", 400);
     }
-
     const result = await BulkOperationsService.bulkExportCampaignData(sessionIds, req.user.id, options);
-
     if (options.format === 'csv') {
       res.setHeader('Content-Type', 'text/csv');
       res.setHeader('Content-Disposition', `attachment; filename="${result.filename}"`);
@@ -1715,24 +1252,16 @@ const bulkExportCampaignData = async (req, res) => {
     throw new AppError(`Failed to bulk export campaign data: ${error.message}`, 500);
   }
 };
-
-/**
- * Bulk cleanup campaigns
- */
 const bulkCleanupCampaigns = async (req, res) => {
   const { sessionIds, options = {} } = req.body;
-
   try {
     if (!sessionIds || !Array.isArray(sessionIds)) {
       throw new AppError("Session IDs array is required", 400);
     }
-
     if (sessionIds.length > 50) {
       throw new AppError("Maximum 50 sessions allowed per bulk cleanup", 400);
     }
-
     const result = await BulkOperationsService.bulkCleanupCampaigns(sessionIds, req.user.id, options);
-
     res.json({
       success: true,
       message: `Cleanup completed for ${result.cleanedSessions} sessions`,
@@ -1743,14 +1272,9 @@ const bulkCleanupCampaigns = async (req, res) => {
     throw new AppError(`Failed to bulk cleanup campaigns: ${error.message}`, 500);
   }
 };
-
-/**
- * Get auto retry service status
- */
 const getAutoRetryServiceStatus = async (req, res) => {
   try {
     const status = AutoRetryService.getServiceStatus();
-
     res.json({
       success: true,
       data: status,
@@ -1760,9 +1284,7 @@ const getAutoRetryServiceStatus = async (req, res) => {
     throw new AppError(`Failed to get auto retry service status: ${error.message}`, 500);
   }
 };
-
 module.exports = {
-  // Existing endpoints
   createBlastSession,
   startBlastSession,
   forceStartBlastSession,
@@ -1779,14 +1301,10 @@ module.exports = {
   getSystemHealth,
   getSessionStats,
   handleSessionAction,
-  validateSessionPhones, // New endpoint
-
-  // Phase 3 - Phone Validation
+  validateSessionPhones, 
   validatePhoneNumbers,
   validateSinglePhone,
   exportPhoneValidation,
-
-  // Phase 3 - Auto Retry Configuration
   configureAutoRetry,
   disableAutoRetry,
   getAutoRetryStatus,
@@ -1794,8 +1312,6 @@ module.exports = {
   resumeAutoRetry,
   forceRetryMessages,
   getAutoRetryServiceStatus,
-
-  // Phase 3 - Bulk Operations
   bulkRetryFailedMessages,
   bulkUpdateMessageStatus,
   bulkDeleteMessages,

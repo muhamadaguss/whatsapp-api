@@ -1,29 +1,16 @@
-/**
- * WhatsApp Session Information Service
- * Handles updating and retrieving WhatsApp account information
- */
-
 const logger = require("../utils/logger");
 const Session = require("../models/sessionModel");
 const { getSock } = require("../auth/session");
-
 class WhatsAppSessionInfoService {
-  /**
-   * Update WhatsApp session information
-   * @param {string} sessionId - WhatsApp session ID
-   * @param {Object} sessionInfo - Session information to update
-   */
   static async updateSessionInfo(sessionId, sessionInfo) {
     try {
       const updateData = {
         lastSeen: new Date(),
         ...sessionInfo
       };
-
       await Session.update(updateData, {
         where: { sessionId },
       });
-
       logger.info(`✅ Updated session info for ${sessionId}`);
       return true;
     } catch (error) {
@@ -31,40 +18,25 @@ class WhatsAppSessionInfoService {
       return false;
     }
   }
-
-  /**
-   * Get WhatsApp account profile information
-   * @param {string} sessionId - WhatsApp session ID
-   */
   static async getAccountProfile(sessionId) {
     try {
       const sock = getSock(sessionId);
       if (!sock) {
         return null;
       }
-
-      // Get profile picture
       let profilePicture = null;
       try {
         const profilePictureUrl = await sock.profilePictureUrl(sock.user.id);
         if (profilePictureUrl) {
-          // Convert to base64 or store URL
           profilePicture = profilePictureUrl;
         }
       } catch (err) {
         logger.warn(`Could not get profile picture for ${sessionId}`);
       }
-
-      // Get phone number and other info
       const phoneNumber = sock.user?.id?.split('@')[0] || null;
       const displayName = sock.user?.name || sock.user?.verifiedName || `Account ${phoneNumber}`;
-
-      // Determine connection quality based on recent activity
       const connectionQuality = this.determineConnectionQuality(sock);
-
-      // Get operator information (if available)
       const operatorInfo = this.getOperatorInfo(phoneNumber);
-
       const accountInfo = {
         phoneNumber: phoneNumber ? `+${phoneNumber}` : null,
         displayName,
@@ -76,48 +48,32 @@ class WhatsAppSessionInfoService {
           lastProfileUpdate: new Date().toISOString()
         }
       };
-
-      // Update database
       await this.updateSessionInfo(sessionId, accountInfo);
-
       return accountInfo;
     } catch (error) {
       logger.error(`❌ Failed to get account profile for ${sessionId}:`, error);
       return null;
     }
   }
-
-  /**
-   * Determine connection quality based on WebSocket state
-   * @param {Object} sock - WhatsApp socket instance
-   */
   static determineConnectionQuality(sock) {
     if (!sock || !sock.ws) {
       return 'poor';
     }
-
     const wsState = sock.ws.readyState;
     switch (wsState) {
-      case 1: // OPEN
+      case 1: 
         return 'excellent';
-      case 0: // CONNECTING
+      case 0: 
         return 'good';
-      case 2: // CLOSING
-      case 3: // CLOSED
+      case 2: 
+      case 3: 
         return 'poor';
       default:
         return 'unknown';
     }
   }
-
-  /**
-   * Get operator information based on phone number
-   * @param {string} phoneNumber - Phone number
-   */
   static getOperatorInfo(phoneNumber) {
     if (!phoneNumber) return null;
-
-    // Indonesian operator detection
     const operators = {
       '811': { provider: 'Telkomsel', type: 'Postpaid' },
       '812': { provider: 'Telkomsel', type: 'Postpaid' },
@@ -159,19 +115,10 @@ class WhatsAppSessionInfoService {
       '898': { provider: 'Three', type: 'Prepaid' },
       '899': { provider: 'Three', type: 'Prepaid' },
     };
-
-    // Extract first 3 digits after country code
     const cleanNumber = phoneNumber.replace(/^\+62/, '');
     const prefix = cleanNumber.substring(0, 3);
-    
     return operators[prefix] || { provider: 'Unknown', type: 'Unknown' };
   }
-
-  /**
-   * Update connection status untuk session
-   * @param {string} sessionId - WhatsApp session ID
-   * @param {string} status - Status (connected, disconnected, connecting)
-   */
   static async updateConnectionStatus(sessionId, status) {
     try {
       await Session.update(
@@ -181,7 +128,6 @@ class WhatsAppSessionInfoService {
         },
         { where: { sessionId } }
       );
-
       logger.info(`✅ Updated connection status for ${sessionId}: ${status}`);
       return true;
     } catch (error) {
@@ -189,14 +135,8 @@ class WhatsAppSessionInfoService {
       return false;
     }
   }
-
-  /**
-   * Batch update session information untuk multiple sessions
-   * @param {Array} sessionIds - Array of session IDs
-   */
   static async batchUpdateSessionInfo(sessionIds) {
     const results = [];
-    
     for (const sessionId of sessionIds) {
       try {
         const accountInfo = await this.getAccountProfile(sessionId);
@@ -205,10 +145,8 @@ class WhatsAppSessionInfoService {
         results.push({ sessionId, success: false, error: error.message });
       }
     }
-
     logger.info(`✅ Batch updated ${results.length} sessions`);
     return results;
   }
 }
-
 module.exports = WhatsAppSessionInfoService;

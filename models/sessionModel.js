@@ -1,8 +1,6 @@
-// /api/models/session.model.js
 const { DataTypes } = require("sequelize");
 const sequelize = require("./db");
 const User = require("./userModel");
-
 const Session = sequelize.define(
   "Session",
   {
@@ -30,18 +28,12 @@ const Session = sequelize.define(
     tableName: "sessions",
   }
 );
-
-// Association function for relationships
 Session.associate = function(models) {
-  // Relationship with User
   Session.belongsTo(models.User, { foreignKey: "userId", as: "user" });
-  
-  // Relationship with BlastSession
   Session.hasMany(models.BlastSession, {
     foreignKey: 'whatsappSessionId',
     sourceKey: 'sessionId',
     as: 'blastSessions'
   });
 };
-
 module.exports = Session;

@@ -2,51 +2,26 @@ const logger = require("./logger");
 const sequelize = require("../models/db");
 const fs = require("fs").promises;
 const path = require("path");
-
-/**
- * Server diagnostics utility for production deployment
- */
 class ServerDiagnostics {
   constructor() {
     this.diagnosticResults = {};
   }
-
-  /**
-   * Run comprehensive server diagnostics
-   */
   async runDiagnostics() {
     logger.info("🔍 Running server diagnostics...");
-
     const results = {
       timestamp: new Date().toISOString(),
       environment: process.env.NODE_ENV || "unknown",
       diagnostics: {},
     };
-
-    // Database diagnostics
     results.diagnostics.database = await this.checkDatabase();
-
-    // File system diagnostics
     results.diagnostics.filesystem = await this.checkFileSystem();
-
-    // Environment diagnostics
     results.diagnostics.environment = await this.checkEnvironment();
-
-    // Network diagnostics
     results.diagnostics.network = await this.checkNetwork();
-
-    // Memory diagnostics
     results.diagnostics.memory = await this.checkMemory();
-
     this.diagnosticResults = results;
     this.logDiagnosticResults(results);
-
     return results;
   }
-
-  /**
-   * Database connectivity and configuration check
-   */
   async checkDatabase() {
     const dbDiagnostics = {
       status: "unknown",
@@ -54,9 +29,7 @@ class ServerDiagnostics {
       config: {},
       errors: [],
     };
-
     try {
-      // Check database configuration
       dbDiagnostics.config = {
         host: process.env.DB_HOST || "not set",
         port: process.env.DB_PORT || "not set",
@@ -64,13 +37,9 @@ class ServerDiagnostics {
         user: process.env.DB_USER || "not set",
         password: process.env.DB_PASS ? "***set***" : "not set",
       };
-
-      // Test database connection
       await sequelize.authenticate();
       dbDiagnostics.connection = true;
       dbDiagnostics.status = "healthy";
-
-      // Get database info
       const [results] = await sequelize.query("SELECT version() as version");
       dbDiagnostics.version = results[0]?.version || "unknown";
     } catch (error) {
@@ -81,8 +50,6 @@ class ServerDiagnostics {
         code: error.code || "unknown",
         errno: error.errno || "unknown",
       });
-
-      // Common database connection issues
       if (error.code === "ECONNREFUSED") {
         dbDiagnostics.errors.push({
           suggestion: "Database server is not running or not accessible",
@@ -100,13 +67,8 @@ class ServerDiagnostics {
         });
       }
     }
-
     return dbDiagnostics;
   }
-
-  /**
-   * File system permissions and directory check
-   */
   async checkFileSystem() {
     const fsDiagnostics = {
       status: "unknown",
@@ -114,9 +76,7 @@ class ServerDiagnostics {
       permissions: {},
       errors: [],
     };
-
     const requiredDirs = ["./uploads", "./logs", "./sessions", "./temp"];
-
     try {
       for (const dir of requiredDirs) {
         const dirPath = path.resolve(dir);
@@ -127,34 +87,25 @@ class ServerDiagnostics {
           size: 0,
           files: 0,
         };
-
         try {
-          // Check if directory exists
           const stats = await fs.stat(dirPath);
           dirInfo.exists = stats.isDirectory();
-
           if (dirInfo.exists) {
-            // Check permissions
             try {
               await fs.access(dirPath, fs.constants.R_OK);
               dirInfo.readable = true;
             } catch (e) {
               dirInfo.readable = false;
             }
-
             try {
               await fs.access(dirPath, fs.constants.W_OK);
               dirInfo.writable = true;
             } catch (e) {
               dirInfo.writable = false;
             }
-
-            // Get directory contents
             try {
               const files = await fs.readdir(dirPath);
               dirInfo.files = files.length;
-
-              // Calculate total size
               let totalSize = 0;
               for (const file of files) {
                 try {
@@ -164,7 +115,6 @@ class ServerDiagnostics {
                     totalSize += fileStats.size;
                   }
                 } catch (e) {
-                  // Skip files that can't be accessed
                 }
               }
               dirInfo.size = totalSize;
@@ -177,7 +127,6 @@ class ServerDiagnostics {
           }
         } catch (error) {
           if (error.code === "ENOENT") {
-            // Directory doesn't exist, try to create it
             try {
               await fs.mkdir(dirPath, { recursive: true });
               dirInfo.exists = true;
@@ -196,16 +145,12 @@ class ServerDiagnostics {
             });
           }
         }
-
         fsDiagnostics.directories[dir] = dirInfo;
       }
-
-      // Overall status
       const hasErrors = fsDiagnostics.errors.length > 0;
       const allDirsOk = Object.values(fsDiagnostics.directories).every(
         (dir) => dir.exists && dir.readable && dir.writable
       );
-
       fsDiagnostics.status = hasErrors || !allDirsOk ? "warning" : "healthy";
     } catch (error) {
       fsDiagnostics.status = "error";
@@ -213,13 +158,8 @@ class ServerDiagnostics {
         error: `File system check failed: ${error.message}`,
       });
     }
-
     return fsDiagnostics;
   }
-
-  /**
-   * Environment variables check
-   */
   async checkEnvironment() {
     const envDiagnostics = {
       status: "unknown",
@@ -227,7 +167,6 @@ class ServerDiagnostics {
       optional: {},
       errors: [],
     };
-
     const requiredVars = {
       DB_NAME: "Database name",
       DB_USER: "Database username",
@@ -235,7 +174,6 @@ class ServerDiagnostics {
       DB_HOST: "Database host",
       JWT_SECRET: "JWT secret key",
     };
-
     const optionalVars = {
       PORT: "Server port",
       DB_PORT: "Database port",
@@ -243,8 +181,6 @@ class ServerDiagnostics {
       ALLOWED_ORIGINS: "CORS allowed origins",
       CLEANUP_DRY_RUN: "File cleanup dry run mode",
     };
-
-    // Check required variables
     for (const [varName, description] of Object.entries(requiredVars)) {
       const value = process.env[varName];
       envDiagnostics.required[varName] = {
@@ -258,7 +194,6 @@ class ServerDiagnostics {
               : "not set"
             : value || "not set",
       };
-
       if (!value) {
         envDiagnostics.errors.push({
           variable: varName,
@@ -266,8 +201,6 @@ class ServerDiagnostics {
         });
       }
     }
-
-    // Check optional variables
     for (const [varName, description] of Object.entries(optionalVars)) {
       const value = process.env[varName];
       envDiagnostics.optional[varName] = {
@@ -276,15 +209,10 @@ class ServerDiagnostics {
         value: value || "not set",
       };
     }
-
     envDiagnostics.status =
       envDiagnostics.errors.length > 0 ? "error" : "healthy";
     return envDiagnostics;
   }
-
-  /**
-   * Network connectivity check
-   */
   async checkNetwork() {
     const networkDiagnostics = {
       status: "unknown",
@@ -293,11 +221,9 @@ class ServerDiagnostics {
       interfaces: {},
       errors: [],
     };
-
     try {
       const os = require("os");
       const networkInterfaces = os.networkInterfaces();
-
       for (const [name, interfaces] of Object.entries(networkInterfaces)) {
         networkDiagnostics.interfaces[name] = interfaces
           .filter((iface) => !iface.internal)
@@ -307,7 +233,6 @@ class ServerDiagnostics {
             mac: iface.mac,
           }));
       }
-
       networkDiagnostics.status = "healthy";
     } catch (error) {
       networkDiagnostics.status = "error";
@@ -315,13 +240,8 @@ class ServerDiagnostics {
         error: `Network check failed: ${error.message}`,
       });
     }
-
     return networkDiagnostics;
   }
-
-  /**
-   * Memory and system resources check
-   */
   async checkMemory() {
     const memoryDiagnostics = {
       status: "unknown",
@@ -329,9 +249,7 @@ class ServerDiagnostics {
       system: {},
       errors: [],
     };
-
     try {
-      // Process memory
       const processMemory = process.memoryUsage();
       memoryDiagnostics.process = {
         heapUsed: Math.round(processMemory.heapUsed / 1024 / 1024) + " MB",
@@ -339,28 +257,22 @@ class ServerDiagnostics {
         external: Math.round(processMemory.external / 1024 / 1024) + " MB",
         rss: Math.round(processMemory.rss / 1024 / 1024) + " MB",
       };
-
-      // System memory
       const os = require("os");
       const totalMemory = os.totalmem();
       const freeMemory = os.freemem();
       const usedMemory = totalMemory - freeMemory;
-
       memoryDiagnostics.system = {
         total: Math.round(totalMemory / 1024 / 1024) + " MB",
         used: Math.round(usedMemory / 1024 / 1024) + " MB",
         free: Math.round(freeMemory / 1024 / 1024) + " MB",
         usage: Math.round((usedMemory / totalMemory) * 100) + "%",
       };
-
-      // Check if memory usage is concerning
       const memoryUsagePercent = (usedMemory / totalMemory) * 100;
       if (memoryUsagePercent > 90) {
         memoryDiagnostics.errors.push({
           error: `High memory usage: ${memoryUsagePercent.toFixed(1)}%`,
         });
       }
-
       memoryDiagnostics.status =
         memoryDiagnostics.errors.length > 0 ? "warning" : "healthy";
     } catch (error) {
@@ -369,18 +281,11 @@ class ServerDiagnostics {
         error: `Memory check failed: ${error.message}`,
       });
     }
-
     return memoryDiagnostics;
   }
-
-  /**
-   * Log diagnostic results
-   */
   logDiagnosticResults(results) {
     logger.info("📊 Server Diagnostics Results:");
     logger.info(`   Environment: ${results.environment}`);
-
-    // Database status
     const db = results.diagnostics.database;
     if (db.status === "healthy") {
       logger.info(
@@ -395,8 +300,6 @@ class ServerDiagnostics {
         }
       });
     }
-
-    // File system status
     const fs = results.diagnostics.filesystem;
     if (fs.status === "healthy") {
       logger.info(`   ✅ File System: All directories accessible`);
@@ -406,8 +309,6 @@ class ServerDiagnostics {
         logger.warn(`      - ${error.directory}: ${error.error}`);
       });
     }
-
-    // Environment status
     const env = results.diagnostics.environment;
     if (env.status === "healthy") {
       logger.info(`   ✅ Environment: All required variables set`);
@@ -417,20 +318,13 @@ class ServerDiagnostics {
         logger.error(`      - ${error.variable}: ${error.error}`);
       });
     }
-
-    // Memory status
     const mem = results.diagnostics.memory;
     logger.info(
       `   📊 Memory: Process ${mem.process.rss}, System ${mem.system.usage}`
     );
   }
-
-  /**
-   * Get diagnostic results
-   */
   getDiagnosticResults() {
     return this.diagnosticResults;
   }
 }
-
 module.exports = ServerDiagnostics;

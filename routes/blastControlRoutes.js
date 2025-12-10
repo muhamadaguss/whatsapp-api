@@ -5,8 +5,6 @@ const path = require("path");
 const blastControlController = require("../controllers/blastControlController");
 const { verifyToken } = require("../middleware/authMiddleware");
 const { asyncHandler } = require("../middleware/errorHandler");
-
-// Configure multer for Excel file uploads (reuse from whatsappRoutes.js)
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, "uploads/");
@@ -15,16 +13,14 @@ const storage = multer.diskStorage({
     cb(null, Date.now() + path.extname(file.originalname));
   },
 });
-
 const upload = multer({
   storage,
   fileFilter: (req, file, cb) => {
-    // Allow Excel files for Enhanced Blast
     if (file.fieldname === "excel") {
       const allowedMimes = [
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
-        "application/vnd.ms-excel", // .xls
-        "text/csv" // .csv
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+        "application/vnd.ms-excel", 
+        "text/csv" 
       ];
       if (allowedMimes.includes(file.mimetype)) {
         cb(null, true);
@@ -36,19 +32,10 @@ const upload = multer({
     }
   },
   limits: {
-    fileSize: 10 * 1024 * 1024, // 10MB limit for Excel files
+    fileSize: 10 * 1024 * 1024, 
   },
 });
-
-/**
- * Blast Control Routes
- * Handles pause/resume/stop functionality for blast sessions
- */
-
-// Apply auth middleware to all routes
 router.use(verifyToken);
-
-// Session Management Routes
 router.post(
   "/sessions/:sessionId/action",
   asyncHandler(blastControlController.handleSessionAction)
@@ -59,7 +46,7 @@ router.post(
 );
 router.post(
   "/sessions",
-  upload.single("excel"), // Add Excel file upload support
+  upload.single("excel"), 
   asyncHandler(blastControlController.createBlastSession)
 );
 router.post(
@@ -82,8 +69,6 @@ router.post(
   "/stop/:sessionId",
   asyncHandler(blastControlController.stopBlastSession)
 );
-
-// Status and Progress Routes
 router.get(
   "/status/:sessionId",
   asyncHandler(blastControlController.getBlastStatus)
@@ -96,8 +81,6 @@ router.get(
   "/sessions",
   asyncHandler(blastControlController.getUserBlastSessions)
 );
-
-// Message Queue Routes
 router.get(
   "/messages/:sessionId",
   asyncHandler(blastControlController.getSessionMessages)
@@ -106,8 +89,6 @@ router.post(
   "/messages/:sessionId/retry",
   asyncHandler(blastControlController.retryFailedMessages)
 );
-
-// Recovery and Cleanup Routes
 router.post(
   "/recover",
   asyncHandler(blastControlController.recoverActiveSessions)
@@ -116,19 +97,11 @@ router.delete(
   "/cleanup/:sessionId",
   asyncHandler(blastControlController.cleanupSession)
 );
-
-// Health and Statistics Routes
 router.get("/health", asyncHandler(blastControlController.getSystemHealth));
 router.get(
   "/stats/:sessionId",
   asyncHandler(blastControlController.getSessionStats)
 );
-
-// =============================================================================
-// PHASE 3 - ADVANCED FEATURES ROUTES
-// =============================================================================
-
-// Phone Validation Routes
 router.post(
   "/validation/phone/batch", 
   asyncHandler(blastControlController.validatePhoneNumbers)
@@ -141,8 +114,6 @@ router.post(
   "/validation/phone/export", 
   asyncHandler(blastControlController.exportPhoneValidation)
 );
-
-// Auto Retry Configuration Routes
 router.post(
   "/retry/:sessionId/configure", 
   asyncHandler(blastControlController.configureAutoRetry)
@@ -171,8 +142,6 @@ router.get(
   "/retry/service/status", 
   asyncHandler(blastControlController.getAutoRetryServiceStatus)
 );
-
-// Bulk Operations Routes
 router.post(
   "/bulk/retry", 
   asyncHandler(blastControlController.bulkRetryFailedMessages)
@@ -201,5 +170,4 @@ router.post(
   "/bulk/campaigns/cleanup", 
   asyncHandler(blastControlController.bulkCleanupCampaigns)
 );
-
 module.exports = router;

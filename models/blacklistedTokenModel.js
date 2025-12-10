@@ -1,6 +1,5 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("./db");
-
 const BlacklistedToken = sequelize.define(
   "BlacklistedToken",
   {
@@ -19,5 +18,4 @@ const BlacklistedToken = sequelize.define(
     tableName: "blacklisted_tokens",
   }
 );
-
 module.exports = BlacklistedToken;
