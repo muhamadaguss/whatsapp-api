@@ -252,8 +252,11 @@ async function initializeDatabase() {
       (modelName) => !["AutoReplyRule", "AutoReplyLog"].includes(modelName)
     );
 
+    // ponytail: alter:true re-adds UNIQUE constraints on every boot (Sequelize bug) until
+    // ALTER TABLE exceeds max_locks_per_transaction. Opt in only when schema changed; migrations are the real fix.
+    const alter = process.env.DB_SYNC_ALTER === "true";
     for (const modelName of modelsToSync) {
-      await sequelize.models[modelName].sync({ alter: true });
+      await sequelize.models[modelName].sync({ alter });
     }
 
     logger.info("📊 Database synced successfully");
