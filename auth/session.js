@@ -7,6 +7,7 @@ const {
   DisconnectReason,
   downloadMediaMessage,
   getContentType,
+  fetchLatestWaWebVersion,
 } = require("@whiskeysockets/baileys");
 const SessionModel = require("../models/sessionModel");
 const MessageStatusModel = require("../models/messageStatusModel");
@@ -15,6 +16,23 @@ const logger = require("../utils/logger");
 const { getSocket } = require("./socket");
 const sessions = {};
 const qrWaiters = {};
+// Hardcoded WA version goes stale -> WA rejects registration with 405 and no QR is emitted.
+// Fetch the live WA Web version once per process; fall back to the last known one.
+const FALLBACK_WA_VERSION = [2, 3000, 1049045808];
+let waVersionPromise = null;
+function getWaVersion() {
+  waVersionPromise ??= fetchLatestWaWebVersion()
+    .then(({ version, isLatest }) => {
+      logger.info(`📦 WA Web version: ${version.join(".")} (latest: ${isLatest})`);
+      return isLatest ? version : FALLBACK_WA_VERSION;
+    })
+    .catch((err) => {
+      logger.warn(`⚠️ Failed to fetch WA Web version, using fallback: ${err.message}`);
+      waVersionPromise = null; // retry on next connect
+      return FALLBACK_WA_VERSION;
+    });
+  return waVersionPromise;
+}
 const statusPriority = {
   sent: 1,
   delivered: 2,
@@ -113,9 +131,8 @@ async function startWhatsApp(sessionId, userId = null) {
     return;
   }
   const { state, saveCreds } = await useMultiFileAuthState(sessionFolder);
-  const WA_VERSION = [2, 3000, 1027934701];
   const sock = makeWASocket({
-    version: WA_VERSION,
+    version: await getWaVersion(),
     auth: state,
     markOnlineOnConnect: false,
   });
